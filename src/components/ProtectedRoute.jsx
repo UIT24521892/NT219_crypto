@@ -1,18 +1,21 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, Outlet, useLocation } from "react-router-dom";
+import { useAuth } from "../contexts/AuthContext";
 
-export default function ProtectedRoute({ children, allowRole }) {
-  const token = localStorage.getItem("accessToken");
-  const userRaw = localStorage.getItem("user");
+export default function ProtectedRoute({ requireAdmin = false }) {
+  const { user, loading } = useAuth();
+  const location = useLocation();
 
-  if (!token || !userRaw) {
-    return <Navigate to="/login" replace />;
+  if (loading) {
+    return <div style={{ padding: 40 }}>Đang kiểm tra đăng nhập...</div>;
   }
 
-  const user = JSON.parse(userRaw);
-
-  if (allowRole && user.role !== allowRole) {
-    return <Navigate to="/login" replace />;
+  if (!user) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  return children;
+  if (requireAdmin && user.role !== "admin") {
+    return <Navigate to="/documents" replace />;
+  }
+
+  return <Outlet />;
 }
