@@ -295,7 +295,7 @@ def write_csv(results: list[AlgorithmBenchmark], output_path: Path) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
     rows = [row for result in results for row in benchmark_to_rows(result)]
     with output_path.open("w", newline="", encoding="utf-8") as csv_file:
-        writer = csv.DictWriter(csv_file, fieldnames=CSV_COLUMNS)
+        writer = csv.DictWriter(csv_file, fieldnames=CSV_COLUMNS, lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 

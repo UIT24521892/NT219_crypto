@@ -6,6 +6,10 @@
 - `backend/app/crypto/key_manager.py`: encrypted file-based admin key storage using AES-256-GCM and a key derived from `KEY_PASSPHRASE`.
 - `backend/app/crypto/qr_builder.py`: compact deterministic JSON payload builder/parser for offline QR verification.
 - `scripts/benchmark.py`: CSV benchmark for FALCON-512, FALCON-1024 when available, Dilithium2/ML-DSA equivalent when available, and ECDSA-P256.
+- `scripts/benchmark_falcon_ecdsa.py`: final report benchmark for only FALCON-512 and ECDSA-P256.
+- `scripts/verify_qr.py`: offline CLI verifier for QR payload JSON, PDF bytes, and raw FALCON public key bytes.
+- `scripts/attack_forgery.py`: demo showing that a tampered PDF fails QR signature verification.
+- `scripts/attack_replay.py`: demo showing that an expired QR payload is rejected as replay.
 - `tests/`: focused pytest coverage for Falcon signing, encrypted key storage, QR payload encoding, and benchmark row helpers.
 
 ## Official Sources Used
@@ -44,4 +48,7 @@ The passphrase is not hardcoded and is not read from source files. Generated key
 ```bash
 python -m pytest tests/test_falcon.py tests/test_key_manager.py tests/test_qr_builder.py -q
 python scripts/benchmark.py --iterations 20
+python scripts/benchmark_falcon_ecdsa.py --iterations 20 --warmup 3
+python scripts/attack_forgery.py
+python scripts/attack_replay.py
 ```
