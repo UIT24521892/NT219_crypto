@@ -2,12 +2,12 @@
 
 | Algorithm | Keygen mean (ms) | Sign mean (ms) | Verify mean (ms) | Public key (B) | Signature (B) | Verify success rate |
 |---|---:|---:|---:|---:|---:|---:|
-| FALCON-512 | 6.748589 | 0.204934 | 0.039381 | 897 | 654 | 1.0000 |
-| ECDSA-P256 | 0.013230 | 0.023947 | 0.064125 | 91 | 71 | 1.0000 |
+| FALCON-512 | 6.374205 | 0.200915 | 0.038230 | 897 | 652 | 1.0000 |
+| ECDSA-P256 | 0.012134 | 0.025394 | 0.063306 | 91 | 71 | 1.0000 |
 
-- Iterations: 20
-- Warmup: 3
-- OS: Linux-6.17.0-23-generic-x86_64-with-glibc2.39
+- Iterations: 100
+- Warmup: 10
+- OS: Linux-6.17.0-29-generic-x86_64-with-glibc2.39
 - Python: 3.12.3 (CPython)
 - cryptography: 48.0.0
 - liboqs-python: 0.15.0
