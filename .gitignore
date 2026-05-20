@@ -12,6 +12,18 @@ dist
 dist-ssr
 *.local
 
+# Python/runtime artifacts
+.venv/
+__pycache__/
+*.py[cod]
+results/
+
+# Secrets and generated key material
+.env
+*.pem
+*.key
+*.key.enc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
