@@ -1,3 +1,5 @@
+import pytest
+
 from backend.app.crypto.falcon_service import (
     ALGORITHM,
     available_signature_algorithms,
@@ -7,6 +9,11 @@ from backend.app.crypto.falcon_service import (
     verify_document,
     verify_signature,
     hash_document,
+)
+
+pytestmark = pytest.mark.skipif(
+    not available_signature_algorithms(),
+    reason="liboqs-python/oqs is not installed or no signature mechanisms are enabled",
 )
 
 
