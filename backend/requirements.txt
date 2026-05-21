@@ -1,3 +1,22 @@
-liboqs-python==0.15.0
-cryptography==48.0.0
-pytest==9.0.3
+# Web framework + ASGI server
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+
+# Database (async)
+sqlalchemy>=2.0.0
+asyncpg>=0.29.0
+alembic>=1.13.0
+
+# Auth: JWT + bcrypt password hashing
+python-jose[cryptography]>=3.3.0
+bcrypt>=4.0.0
+
+# File upload (multipart/form-data)
+python-multipart>=0.0.9
+
+# Config & env
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+email-validator>=2.0.0
+qrcode[pil]>=7.4
+liboqs-python>=0.14
