@@ -34,3 +34,7 @@ results/
 *.njsproj
 *.sln
 *.sw?
+
+# Backend runtime (secrets/generated)
+backend/keys/
+backend/storage/uploads/
