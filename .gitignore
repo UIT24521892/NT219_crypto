@@ -38,3 +38,9 @@ results/
 # Backend runtime (secrets/generated)
 backend/keys/
 backend/storage/uploads/
+backend/liboqs/
+backend/.venv/
+backend/storage/
+backend/.env
+__pycache__/
+*.pyc
