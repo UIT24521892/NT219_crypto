@@ -21,8 +21,16 @@ from pathlib import Path
 from threading import Lock
 from typing import Tuple
 
-from app.crypto import falcon_primitives as fp
-from app.crypto import key_manager as km
+from . import falcon_primitives as fp
+from . import key_manager as km
+
+ALGORITHM = fp.ALGORITHM
+PREFERRED_ALGORITHM = fp.PREFERRED_ALGORITHM
+available_signature_algorithms = fp.available_signature_algorithms
+generate_keypair = fp.generate_keypair
+hash_document = fp.hash_document
+resolve_algorithm = fp.resolve_algorithm
+verify_document = fp.verify_document
 
 # keys/ nam o backend/keys/ (cung cap voi app/)
 _KEYS_DIR = Path(__file__).resolve().parent.parent.parent / "keys"
@@ -61,23 +69,39 @@ def get_public_key() -> bytes:
     return public_key
 
 
-def sign_document(pdf_bytes: bytes) -> Tuple[bytes, bytes]:
+def sign_document(
+    pdf_bytes: bytes,
+    private_key: bytes | None = None,
+    algorithm: str = ALGORITHM,
+) -> Tuple[bytes, bytes] | tuple[str, bytes]:
     """
-    Ky document bang private key cua server.
+    Ky document bang FALCON.
 
-    A's sign_document(pdf_bytes, private_key) -> (doc_hash_hex, signature).
-    Adapter dung private key da giai ma, tra (signature, public_key) cho backend.
+    - sign_document(pdf_bytes) -> (signature, public_key): adapter cho backend deploy.
+    - sign_document(pdf_bytes, private_key) -> (doc_hash_hex, signature): API primitive
+      tuong thich voi tests/scripts offline cua Member A.
     """
+    if private_key is not None:
+        return fp.sign_document(pdf_bytes, private_key, algorithm)
+
     public_key, private_key = _load_or_create_keys()
-    _doc_hash_hex, signature = fp.sign_document(pdf_bytes, private_key)
+    _doc_hash_hex, signature = fp.sign_document(pdf_bytes, private_key, algorithm)
     return signature, public_key
 
 
-def verify_signature(pdf_bytes: bytes, signature: bytes, public_key: bytes) -> bool:
+def verify_signature(
+    document_or_hash: bytes | str,
+    signature: bytes,
+    public_key: bytes,
+    algorithm: str = ALGORITHM,
+) -> bool:
     """
-    Verify chu ky FALCON tren document.
+    Verify chu ky FALCON tren document hoac SHA-256 hex digest.
 
-    Dung A's verify_document (tu recompute SHA-256 hash cua pdf roi verify).
-    True neu hop le (document khong bi sua), False neu sai/tampered.
+    - verify_signature(pdf_bytes, signature, public_key): adapter deploy.
+    - verify_signature(doc_hash_hex, signature, public_key): API primitive cu.
     """
-    return fp.verify_document(pdf_bytes, signature, public_key)
+    if isinstance(document_or_hash, str):
+        return fp.verify_signature(document_or_hash, signature, public_key, algorithm)
+
+    return fp.verify_document(document_or_hash, signature, public_key, algorithm=algorithm)
