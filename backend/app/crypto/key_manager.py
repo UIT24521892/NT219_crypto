@@ -14,7 +14,7 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
-from app.crypto.falcon_primitives import ALGORITHM, generate_keypair, resolve_algorithm
+from .falcon_primitives import ALGORITHM, generate_keypair, resolve_algorithm
 
 
 KEY_PASSPHRASE_ENV: Final[str] = "KEY_PASSPHRASE"
