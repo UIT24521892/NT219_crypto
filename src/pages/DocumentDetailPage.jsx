@@ -16,6 +16,7 @@ export default function DocumentDetailPage() {
   const [doc, setDoc] = useState(null);
   const [qrUrl, setQrUrl] = useState("");
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(false);
   const [qrLoading, setQrLoading] = useState(false);
   const [signing, setSigning] = useState(false);
@@ -30,6 +31,7 @@ export default function DocumentDetailPage() {
       const data = await getDocument(id);
       setDoc(data);
     } catch (err) {
+      setMessageType("error");
       setMessage(
         err.response?.data?.detail ||
           "Không tải được thông tin tài liệu. Kiểm tra backend hoặc document id."
@@ -57,6 +59,7 @@ export default function DocumentDetailPage() {
 
       URL.revokeObjectURL(url);
     } catch (err) {
+      setMessageType("error");
       setMessage(
         err.response?.data?.detail ||
           "Tải file thất bại. Kiểm tra endpoint download."
@@ -66,13 +69,16 @@ export default function DocumentDetailPage() {
 
   async function handleSign() {
     setSigning(true);
+    setMessageType("info");
     setMessage("Đang ký tài liệu bằng FALCON-512...");
 
     try {
       await signDocument(id);
+      setMessageType("success");
       setMessage("Ký tài liệu thành công.");
       await loadDocument();
     } catch (err) {
+      setMessageType("error");
       setMessage(
         err.response?.data?.detail ||
           err.response?.data?.message ||
@@ -91,6 +97,7 @@ export default function DocumentDetailPage() {
       const url = await getQrCode(id);
       setQrUrl(url);
     } catch (err) {
+      setMessageType("error");
       setMessage(
         err.response?.data?.detail ||
           "Không tạo được QR. Tài liệu phải được ký trước."
@@ -102,8 +109,8 @@ export default function DocumentDetailPage() {
 
   function shortHash(hash) {
     if (!hash) return "-";
-    if (hash.length <= 24) return hash;
-    return `${hash.slice(0, 16)}...${hash.slice(-10)}`;
+    if (hash.length <= 28) return hash;
+    return `${hash.slice(0, 18)}...${hash.slice(-10)}`;
   }
 
   function formatDate(value) {
@@ -132,9 +139,10 @@ export default function DocumentDetailPage() {
     <div>
       <div style={styles.header}>
         <div>
-          <h1>Chi tiết tài liệu</h1>
+          <p style={styles.kicker}>Hồ sơ tài liệu</p>
+          <h1 style={styles.title}>Chi tiết tài liệu</h1>
           <p style={styles.subtitle}>
-            Xem thông tin hash, chữ ký số FALCON và QR xác thực tài liệu.
+            Theo dõi hash, trạng thái ký số và QR xác thực công khai.
           </p>
         </div>
 
@@ -143,77 +151,46 @@ export default function DocumentDetailPage() {
         </Link>
       </div>
 
-      {message && <p style={styles.message}>{message}</p>}
+      {message && (
+        <p
+          style={{
+            ...styles.message,
+            ...(messageType === "success" ? styles.messageSuccess : {}),
+            ...(messageType === "error" ? styles.messageError : {}),
+          }}
+        >
+          {message}
+        </p>
+      )}
 
       <section style={styles.card}>
-        <h2 style={styles.sectionTitle}>Thông tin tài liệu</h2>
+        <div style={styles.cardHeader}>
+          <h2 style={styles.sectionTitle}>Thông tin định danh</h2>
+          <span
+            style={{
+              ...styles.badge,
+              ...(isSigned ? styles.badgeSigned : styles.badgePending),
+            }}
+          >
+            {isSigned ? "Đã ký" : "Chờ ký"}
+          </span>
+        </div>
 
         <div style={styles.grid}>
-          <div>
-            <p style={styles.label}>Document ID</p>
-            <p style={styles.valueBreak}>{doc.id}</p>
-          </div>
-
-          <div>
-            <p style={styles.label}>Tên file</p>
-            <p style={styles.value}>{doc.filename || "-"}</p>
-          </div>
-
-          <div>
-            <p style={styles.label}>Dung lượng</p>
-            <p style={styles.value}>
-              {doc.file_size ? `${doc.file_size} bytes` : "-"}
-            </p>
-          </div>
-
-          <div>
-            <p style={styles.label}>Trạng thái</p>
-            <span
-              style={{
-                ...styles.badge,
-                ...(isSigned ? styles.badgeSigned : styles.badgePending),
-              }}
-            >
-              {status}
-            </span>
-          </div>
-
-          <div>
-            <p style={styles.label}>SHA-256 hash</p>
-            <p style={styles.valueBreak} title={doc.file_hash}>
-              {shortHash(doc.file_hash)}
-            </p>
-          </div>
-
-          <div>
-            <p style={styles.label}>Thuật toán</p>
-            <p style={styles.value}>FALCON-512</p>
-          </div>
-
-          <div>
-            <p style={styles.label}>Ngày upload</p>
-            <p style={styles.value}>{formatDate(doc.created_at)}</p>
-          </div>
-
-          <div>
-            <p style={styles.label}>Ngày ký</p>
-            <p style={styles.value}>{formatDate(doc.signed_at)}</p>
-          </div>
-
-          <div>
-            <p style={styles.label}>Public key ref</p>
-            <p style={styles.value}>{doc.public_key_ref || "-"}</p>
-          </div>
-
-          <div>
-            <p style={styles.label}>Người ký</p>
-            <p style={styles.value}>{doc.signer_email || doc.signed_by || "-"}</p>
-          </div>
+          <Info label="Document ID" value={doc.id} breakText />
+          <Info label="Tên file" value={doc.filename} />
+          <Info label="Dung lượng" value={doc.file_size ? `${doc.file_size} bytes` : "-"} />
+          <Info label="SHA-256" value={shortHash(doc.file_hash)} breakText />
+          <Info label="Thuật toán" value="FALCON-512" />
+          <Info label="Ngày upload" value={formatDate(doc.created_at)} />
+          <Info label="Ngày ký" value={formatDate(doc.signed_at)} />
+          <Info label="Public key ref" value={doc.public_key_ref || "-"} />
+          <Info label="Người ký" value={doc.signer_email || doc.signed_by || "-"} />
         </div>
       </section>
 
       <section style={styles.card}>
-        <h2 style={styles.sectionTitle}>Thao tác</h2>
+        <h2 style={styles.sectionTitle}>Thao tác tài liệu</h2>
 
         <div style={styles.actions}>
           <button type="button" onClick={handleDownload} style={styles.btnBlue}>
@@ -251,7 +228,7 @@ export default function DocumentDetailPage() {
 
         {!isSigned && (
           <p style={styles.note}>
-            Tài liệu đang ở trạng thái pending. Cần admin ký FALCON trước khi tạo QR.
+            Tài liệu đang chờ ký. Admin cần ký FALCON trước khi tạo QR.
           </p>
         )}
       </section>
@@ -260,10 +237,7 @@ export default function DocumentDetailPage() {
         <section style={styles.card}>
           <h2 style={styles.sectionTitle}>QR xác thực</h2>
 
-          <p style={styles.note}>
-            QR sẽ trỏ về trang verify public:
-          </p>
-
+          <p style={styles.note}>Đường dẫn xác thực công khai:</p>
           <p style={styles.verifyLink}>{verifyUrl}</p>
 
           {qrUrl ? (
@@ -271,12 +245,19 @@ export default function DocumentDetailPage() {
               <img src={qrUrl} alt="Document QR Code" style={styles.qrImage} />
             </div>
           ) : (
-            <p style={styles.note}>
-              Bấm “Xem QR” để lấy ảnh QR từ backend.
-            </p>
+            <p style={styles.note}>Bấm “Xem QR” để lấy ảnh QR từ backend.</p>
           )}
         </section>
       )}
+    </div>
+  );
+}
+
+function Info({ label, value, breakText }) {
+  return (
+    <div style={styles.infoItem}>
+      <p style={styles.label}>{label}</p>
+      <p style={breakText ? styles.valueBreak : styles.value}>{value || "-"}</p>
     </div>
   );
 }
@@ -289,54 +270,83 @@ const styles = {
     gap: 16,
     marginBottom: 20,
   },
+  kicker: {
+    margin: 0,
+    color: "#8b1e1e",
+    fontWeight: 900,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    fontSize: 12,
+  },
+  title: {
+    margin: "4px 0 0",
+    fontSize: 32,
+    color: "#111827",
+  },
   subtitle: {
     color: "#64748b",
-    marginTop: 4,
+    marginTop: 6,
   },
   backLink: {
-    color: "#1e3a8a",
-    fontWeight: 600,
+    color: "#8b1e1e",
+    fontWeight: 900,
     textDecoration: "none",
   },
   card: {
     background: "white",
     border: "1px solid #e2e8f0",
-    borderRadius: 10,
+    borderRadius: 16,
     padding: 20,
     marginBottom: 18,
+    boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+  },
+  cardHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 16,
   },
   sectionTitle: {
-    marginTop: 0,
-    marginBottom: 16,
+    margin: 0,
     fontSize: 20,
-    color: "#0f172a",
+    color: "#111827",
   },
   grid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-    gap: 16,
+    gap: 14,
+  },
+  infoItem: {
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    padding: 13,
   },
   label: {
-    margin: "0 0 4px",
+    margin: "0 0 5px",
     color: "#64748b",
-    fontSize: 13,
-    fontWeight: 600,
+    fontSize: 12,
+    fontWeight: 900,
+    textTransform: "uppercase",
   },
   value: {
     margin: 0,
-    color: "#0f172a",
+    color: "#111827",
+    fontWeight: 700,
   },
   valueBreak: {
     margin: 0,
-    color: "#0f172a",
+    color: "#111827",
     wordBreak: "break-all",
+    fontWeight: 700,
   },
   badge: {
     display: "inline-block",
-    padding: "5px 10px",
+    padding: "6px 11px",
     borderRadius: 999,
     fontSize: 12,
-    fontWeight: 700,
+    fontWeight: 900,
   },
   badgeSigned: {
     background: "#dcfce7",
@@ -355,66 +365,77 @@ const styles = {
     background: "#1e3a8a",
     color: "white",
     border: 0,
-    borderRadius: 6,
+    borderRadius: 10,
     padding: "10px 14px",
     cursor: "pointer",
-    fontWeight: 600,
+    fontWeight: 800,
   },
   btnGreen: {
-    background: "#16a34a",
+    background: "#047857",
     color: "white",
     border: 0,
-    borderRadius: 6,
+    borderRadius: 10,
     padding: "10px 14px",
     cursor: "pointer",
-    fontWeight: 600,
+    fontWeight: 800,
   },
   btnOutline: {
-    border: "1px solid #1e3a8a",
-    color: "#1e3a8a",
+    border: "1px solid #8b1e1e",
+    color: "#8b1e1e",
     background: "white",
-    borderRadius: 6,
+    borderRadius: 10,
     padding: "10px 14px",
     textDecoration: "none",
-    fontWeight: 600,
+    fontWeight: 900,
   },
   note: {
     color: "#64748b",
     marginBottom: 0,
   },
   verifyLink: {
-    background: "#f8fafc",
-    border: "1px solid #e2e8f0",
-    padding: 10,
-    borderRadius: 6,
+    background: "#fff7ed",
+    border: "1px solid #fed7aa",
+    padding: 12,
+    borderRadius: 10,
     wordBreak: "break-all",
-    color: "#1e3a8a",
+    color: "#8b1e1e",
+    fontWeight: 800,
   },
   qrBox: {
     marginTop: 16,
     background: "#f8fafc",
     border: "1px solid #e2e8f0",
-    borderRadius: 10,
+    borderRadius: 14,
     padding: 20,
     display: "inline-block",
   },
   qrImage: {
-    width: 220,
-    height: 220,
+    width: 230,
+    height: 230,
     objectFit: "contain",
   },
   message: {
+    padding: "12px 14px",
+    borderRadius: 12,
     background: "#eff6ff",
-    color: "#1e40af",
-    padding: "10px 12px",
-    borderRadius: 6,
-    marginBottom: 16,
+    color: "#1d4ed8",
+    border: "1px solid #bfdbfe",
+    fontWeight: 650,
+  },
+  messageSuccess: {
+    background: "#ecfdf5",
+    color: "#047857",
+    borderColor: "#a7f3d0",
+  },
+  messageError: {
+    background: "#fef2f2",
+    color: "#b91c1c",
+    borderColor: "#fecaca",
   },
   error: {
     background: "#fee2e2",
     color: "#991b1b",
     padding: "10px 12px",
-    borderRadius: 6,
-    marginBottom: 16,
+    borderRadius: 10,
   },
 };

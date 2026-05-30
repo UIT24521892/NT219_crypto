@@ -14,6 +14,7 @@ export default function DocumentsListPage() {
   const [documents, setDocuments] = useState([]);
   const [file, setFile] = useState(null);
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(false);
   const [signingId, setSigningId] = useState(null);
 
@@ -34,6 +35,7 @@ export default function DocumentsListPage() {
         setDocuments([]);
       }
     } catch (err) {
+      setMessageType("error");
       setMessage(
         err.response?.data?.detail ||
           "Chưa kết nối được backend hoặc API /documents lỗi."
@@ -52,19 +54,23 @@ export default function DocumentsListPage() {
     event.preventDefault();
 
     if (!file) {
+      setMessageType("warning");
       setMessage("Chọn file PDF trước đã.");
       return;
     }
 
     setLoading(true);
+    setMessageType("info");
     setMessage("Đang upload tài liệu...");
 
     try {
       await uploadDocument(file);
       setFile(null);
-      setMessage("Upload thành công.");
+      setMessageType("success");
+      setMessage("Upload thành công. Backend đã tính SHA-256 cho tài liệu.");
       await loadDocuments();
     } catch (err) {
+      setMessageType("error");
       setMessage(
         err.response?.data?.detail ||
           "Upload thất bại. Kiểm tra backend hoặc endpoint /documents/upload."
@@ -78,21 +84,26 @@ export default function DocumentsListPage() {
     const docId = doc.id || doc.doc_id;
 
     if (!docId) {
+      setMessageType("error");
       setMessage("Không tìm thấy document id để ký.");
       return;
     }
 
     setSigningId(docId);
+    setMessageType("info");
     setMessage("Đang ký tài liệu bằng FALCON-512...");
 
     try {
       await signDocument(docId);
-      setMessage("Ký tài liệu thành công.");
+      setMessageType("success");
+      setMessage("Ký tài liệu thành công. Trạng thái đã chuyển sang signed.");
       await loadDocuments();
     } catch (err) {
+      setMessageType("error");
       setMessage(
         err.response?.data?.detail ||
-          "Ký tài liệu thất bại. Kiểm tra quyền admin hoặc backend."
+          err.response?.data?.message ||
+          `Ký thất bại. Status: ${err.response?.status || "Network Error"}`
       );
     } finally {
       setSigningId(null);
@@ -101,187 +112,333 @@ export default function DocumentsListPage() {
 
   function shortHash(hash) {
     if (!hash) return "-";
-    if (hash.length <= 20) return hash;
-    return `${hash.slice(0, 12)}...${hash.slice(-8)}`;
+    if (hash.length <= 24) return hash;
+    return `${hash.slice(0, 14)}...${hash.slice(-10)}`;
   }
+
+  function formatDate(value) {
+    if (!value) return "-";
+    return new Date(value).toLocaleString("vi-VN");
+  }
+
+  const totalSigned = documents.filter((doc) => doc.status === "signed").length;
+  const totalPending = documents.filter((doc) => doc.status === "pending").length;
 
   return (
     <div>
-      <h1>Danh sách tài liệu</h1>
+      <div style={styles.pageHeader}>
+        <div>
+          <p style={styles.kicker}>Quản lý tài liệu</p>
+          <h1 style={styles.title}>Danh sách tài liệu</h1>
+          <p style={styles.subtitle}>
+            Upload PDF, theo dõi SHA-256 hash và trạng thái ký số FALCON-512.
+          </p>
+        </div>
+      </div>
 
-      <p style={{ color: "#64748b" }}>
-        Quản lý tài liệu đã upload và theo dõi trạng thái ký số FALCON.
-      </p>
+      <div style={styles.statsGrid}>
+        <StatCard label="Tổng tài liệu" value={documents.length} tone="blue" />
+        <StatCard label="Đã ký" value={totalSigned} tone="green" />
+        <StatCard label="Chờ ký" value={totalPending} tone="yellow" />
+      </div>
 
       <form onSubmit={handleUpload} style={styles.uploadBox}>
-        <input
-          type="file"
-          accept=".pdf"
-          onChange={(e) => setFile(e.target.files?.[0] || null)}
-        />
+        <div>
+          <p style={styles.uploadTitle}>Upload tài liệu PDF</p>
+          <p style={styles.uploadSub}>
+            Backend sẽ kiểm tra định dạng PDF và sinh SHA-256 hash.
+          </p>
+        </div>
 
-        <button type="submit" disabled={loading} style={styles.primaryButton}>
-          {loading ? "Đang xử lý..." : "Upload PDF"}
-        </button>
+        <div style={styles.uploadActions}>
+          <input
+            type="file"
+            accept=".pdf"
+            onChange={(e) => setFile(e.target.files?.[0] || null)}
+          />
+
+          <button type="submit" disabled={loading} style={styles.primaryButton}>
+            {loading ? "Đang xử lý..." : "Upload PDF"}
+          </button>
+        </div>
       </form>
 
-      {message && <p style={styles.message}>{message}</p>}
+      {message && (
+        <p
+          style={{
+            ...styles.message,
+            ...(messageType === "success" ? styles.messageSuccess : {}),
+            ...(messageType === "error" ? styles.messageError : {}),
+            ...(messageType === "warning" ? styles.messageWarning : {}),
+          }}
+        >
+          {message}
+        </p>
+      )}
 
-      {loading && <p>Đang tải...</p>}
-
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            <th style={styles.th}>ID</th>
-            <th style={styles.th}>Tên file</th>
-            <th style={styles.th}>SHA-256</th>
-            <th style={styles.th}>Trạng thái</th>
-            <th style={styles.th}>Ngày upload</th>
-            <th style={styles.th}>Thao tác</th>
-          </tr>
-        </thead>
-
-        <tbody>
-          {documents.length === 0 && (
+      <div style={styles.tableCard}>
+        <table style={styles.table}>
+          <thead>
             <tr>
-              <td colSpan="6" style={styles.td}>
-                Chưa có tài liệu hoặc backend chưa trả dữ liệu.
-              </td>
+              <th style={styles.th}>Mã tài liệu</th>
+              <th style={styles.th}>Tên file</th>
+              <th style={styles.th}>SHA-256</th>
+              <th style={styles.th}>Trạng thái</th>
+              <th style={styles.th}>Ngày upload</th>
+              <th style={styles.th}>Thao tác</th>
             </tr>
-          )}
+          </thead>
 
-          {documents.map((doc) => {
-            const docId = doc.id || doc.doc_id;
-            const filename = doc.filename || doc.fileName || "-";
-            const hash = doc.file_hash || doc.fileHash || "-";
-            const status = doc.status || "-";
-            const createdAt = doc.created_at || doc.createdAt || "-";
-            const isSigned = status === "signed";
-
-            return (
-              <tr key={docId}>
-                <td style={{ ...styles.td, maxWidth: 180, wordBreak: "break-all" }}>
-                  {docId}
-                </td>
-
-                <td style={styles.td}>{filename}</td>
-
-                <td style={styles.td} title={hash}>
-                  {shortHash(hash)}
-                </td>
-
-                <td style={styles.td}>
-                  <span
-                    style={{
-                      ...styles.badge,
-                      ...(isSigned ? styles.badgeSigned : styles.badgePending),
-                    }}
-                  >
-                    {status}
-                  </span>
-                </td>
-
-                <td style={styles.td}>
-                  {createdAt !== "-"
-                    ? new Date(createdAt).toLocaleString("vi-VN")
-                    : "-"}
-                </td>
-
-                <td style={styles.td}>
-                  <div style={styles.actions}>
-                    <Link to={`/documents/${docId}`} style={styles.linkButton}>
-                      Xem
-                    </Link>
-
-                    {isAdmin && !isSigned && (
-                      <button
-                        type="button"
-                        onClick={() => handleSign(doc)}
-                        disabled={signingId === docId}
-                        style={styles.signButton}
-                      >
-                        {signingId === docId ? "Đang ký..." : "Ký FALCON"}
-                      </button>
-                    )}
-                  </div>
+          <tbody>
+            {documents.length === 0 && (
+              <tr>
+                <td colSpan="6" style={styles.emptyTd}>
+                  Chưa có tài liệu hoặc backend chưa trả dữ liệu.
                 </td>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            )}
+
+            {documents.map((doc) => {
+              const docId = doc.id || doc.doc_id;
+              const filename = doc.filename || doc.fileName || "-";
+              const hash = doc.file_hash || doc.fileHash || "-";
+              const status = doc.status || "-";
+              const createdAt = doc.created_at || doc.createdAt || "-";
+              const isSigned = status === "signed";
+
+              return (
+                <tr key={docId}>
+                  <td style={styles.td}>
+                    <span style={styles.docId}>{docId}</span>
+                  </td>
+
+                  <td style={styles.td}>
+                    <strong>{filename}</strong>
+                  </td>
+
+                  <td style={styles.td} title={hash}>
+                    <code style={styles.hash}>{shortHash(hash)}</code>
+                  </td>
+
+                  <td style={styles.td}>
+                    <span
+                      style={{
+                        ...styles.badge,
+                        ...(isSigned ? styles.badgeSigned : styles.badgePending),
+                      }}
+                    >
+                      {isSigned ? "Đã ký" : "Chờ ký"}
+                    </span>
+                  </td>
+
+                  <td style={styles.td}>
+                    {createdAt !== "-" ? formatDate(createdAt) : "-"}
+                  </td>
+
+                  <td style={styles.td}>
+                    <div style={styles.actions}>
+                      <Link to={`/documents/${docId}`} style={styles.linkButton}>
+                        Xem
+                      </Link>
+
+                      {isAdmin && !isSigned && (
+                        <button
+                          type="button"
+                          onClick={() => handleSign(doc)}
+                          disabled={signingId === docId}
+                          style={styles.signButton}
+                        >
+                          {signingId === docId ? "Đang ký..." : "Ký FALCON"}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function StatCard({ label, value, tone }) {
+  const toneStyle =
+    tone === "green"
+      ? { background: "#ecfdf5", color: "#047857" }
+      : tone === "yellow"
+      ? { background: "#fffbeb", color: "#92400e" }
+      : { background: "#eff6ff", color: "#1d4ed8" };
+
+  return (
+    <div style={styles.statCard}>
+      <p style={styles.statLabel}>{label}</p>
+      <p style={{ ...styles.statValue, ...toneStyle }}>{value}</p>
     </div>
   );
 }
 
 const styles = {
+  pageHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    marginBottom: 20,
+  },
+  kicker: {
+    margin: 0,
+    color: "#8b1e1e",
+    fontWeight: 900,
+    textTransform: "uppercase",
+    letterSpacing: 0.8,
+    fontSize: 12,
+  },
+  title: {
+    margin: "4px 0 0",
+    fontSize: 32,
+    color: "#111827",
+  },
+  subtitle: {
+    margin: "8px 0 0",
+    color: "#64748b",
+  },
+  statsGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+    gap: 14,
+    marginBottom: 18,
+  },
+  statCard: {
+    background: "white",
+    border: "1px solid #e2e8f0",
+    borderRadius: 14,
+    padding: 16,
+  },
+  statLabel: {
+    margin: 0,
+    color: "#64748b",
+    fontSize: 13,
+    fontWeight: 700,
+  },
+  statValue: {
+    margin: "10px 0 0",
+    width: 48,
+    height: 48,
+    borderRadius: 14,
+    display: "grid",
+    placeItems: "center",
+    fontSize: 22,
+    fontWeight: 900,
+  },
   uploadBox: {
     display: "flex",
-    gap: 12,
+    justifyContent: "space-between",
     alignItems: "center",
+    gap: 18,
     background: "white",
-    padding: 16,
-    borderRadius: 8,
-    margin: "20px 0",
+    padding: 18,
+    borderRadius: 16,
+    margin: "18px 0",
     border: "1px solid #e2e8f0",
+    boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
+  },
+  uploadTitle: {
+    margin: 0,
+    color: "#111827",
+    fontWeight: 900,
+  },
+  uploadSub: {
+    margin: "4px 0 0",
+    color: "#64748b",
+    fontSize: 13,
+  },
+  uploadActions: {
+    display: "flex",
+    alignItems: "center",
+    gap: 12,
+  },
+  primaryButton: {
+    background: "#8b1e1e",
+    color: "white",
+    border: 0,
+    padding: "10px 14px",
+    borderRadius: 10,
+    cursor: "pointer",
+    fontWeight: 800,
   },
   message: {
+    padding: "12px 14px",
+    borderRadius: 12,
     background: "#eff6ff",
-    color: "#1e40af",
-    padding: "10px 12px",
-    borderRadius: 6,
+    color: "#1d4ed8",
+    border: "1px solid #bfdbfe",
+    fontWeight: 650,
+  },
+  messageSuccess: {
+    background: "#ecfdf5",
+    color: "#047857",
+    borderColor: "#a7f3d0",
+  },
+  messageError: {
+    background: "#fef2f2",
+    color: "#b91c1c",
+    borderColor: "#fecaca",
+  },
+  messageWarning: {
+    background: "#fffbeb",
+    color: "#92400e",
+    borderColor: "#fde68a",
+  },
+  tableCard: {
+    background: "white",
+    border: "1px solid #e2e8f0",
+    borderRadius: 16,
+    overflow: "hidden",
+    boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
   },
   table: {
     width: "100%",
     borderCollapse: "collapse",
-    background: "white",
-    borderRadius: 8,
-    overflow: "hidden",
   },
   th: {
     textAlign: "left",
-    background: "#e2e8f0",
-    padding: 10,
-    borderBottom: "1px solid #cbd5e1",
+    background: "#f1f5f9",
+    padding: 13,
+    color: "#334155",
+    fontSize: 13,
+    borderBottom: "1px solid #dbe3ee",
   },
   td: {
-    padding: 10,
-    borderBottom: "1px solid #e2e8f0",
+    padding: 13,
+    borderBottom: "1px solid #eef2f7",
     verticalAlign: "top",
+    fontSize: 14,
   },
-  actions: {
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    flexWrap: "wrap",
+  emptyTd: {
+    padding: 28,
+    textAlign: "center",
+    color: "#64748b",
   },
-  primaryButton: {
-    background: "#1e3a8a",
-    color: "white",
-    border: 0,
-    padding: "8px 12px",
+  docId: {
+    display: "inline-block",
+    maxWidth: 190,
+    wordBreak: "break-all",
+    color: "#475569",
+    fontSize: 12,
+  },
+  hash: {
+    color: "#7a1414",
+    background: "#fff7ed",
+    padding: "4px 6px",
     borderRadius: 6,
-    cursor: "pointer",
-  },
-  linkButton: {
-    color: "#1e3a8a",
-    textDecoration: "none",
-    fontWeight: 600,
-  },
-  signButton: {
-    background: "#16a34a",
-    color: "white",
-    border: 0,
-    padding: "7px 10px",
-    borderRadius: 6,
-    cursor: "pointer",
   },
   badge: {
     display: "inline-block",
-    padding: "4px 8px",
+    padding: "5px 10px",
     borderRadius: 999,
     fontSize: 12,
-    fontWeight: 700,
+    fontWeight: 900,
   },
   badgeSigned: {
     background: "#dcfce7",
@@ -290,5 +447,25 @@ const styles = {
   badgePending: {
     background: "#fef3c7",
     color: "#92400e",
+  },
+  actions: {
+    display: "flex",
+    gap: 8,
+    alignItems: "center",
+    flexWrap: "wrap",
+  },
+  linkButton: {
+    color: "#8b1e1e",
+    textDecoration: "none",
+    fontWeight: 900,
+  },
+  signButton: {
+    background: "#047857",
+    color: "white",
+    border: 0,
+    padding: "8px 10px",
+    borderRadius: 9,
+    cursor: "pointer",
+    fontWeight: 800,
   },
 };
