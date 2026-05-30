@@ -36,6 +36,8 @@ export default function VerifyPage() {
 
   useEffect(() => {
     if (docId) {
+      // Verify the document automatically when a scanned URL is opened.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       runVerify(docId);
     }
   }, [docId]);

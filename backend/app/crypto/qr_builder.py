@@ -1,20 +1,6 @@
-"""
-Citizen Services Portal — QR code builder for signed documents.
-
-The QR payload is intentionally COMPACT — only contains the verification URL
-and a short integrity hash. The actual FALCON-512 signature (666 bytes) is
-NOT embedded; the verify endpoint fetches it from the database by doc_id.
-
-This keeps the QR small enough to scan reliably from a phone camera at
-distance (target: ≤ 400 alphanumeric chars / version-15 QR).
-
-⚠ Member A may replace this with a more sophisticated qr_builder that
-embeds the full signature for offline verification. The interface below
-(build_payload + render_png) should stay backward-compatible.
-"""
-import json
 import base64
 import binascii
+import json
 import time
 from io import BytesIO
 from typing import Any, Final
@@ -39,9 +25,43 @@ def b64url_decode(value: str) -> bytes:
         raise TypeError("value must be a string")
     padded = value + ("=" * (-len(value) % 4))
     try:
-        return base64.urlsafe_b64decode(padded.encode("ascii"))
+        return base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True)
     except (binascii.Error, UnicodeEncodeError) as exc:
         raise ValueError("invalid base64url value") from exc
+
+
+def build_online_payload(verify_url: str) -> str:
+    """Return the URL encoded by the phone-scannable online QR code."""
+
+    if not isinstance(verify_url, str) or not verify_url:
+        raise ValueError("verify_url is required for online QR payload")
+    return verify_url
+
+
+def build_offline_payload(
+    doc_id: str,
+    doc_hash_hex: str,
+    signature: bytes,
+    issued_at: int,
+    expires_at: int,
+    algorithm: str = QR_ALGORITHM,
+) -> str:
+    """Build the signed minified JSON payload used by the offline verifier."""
+
+    if not isinstance(signature, bytes) or not signature:
+        raise ValueError("signature is required for offline QR payload")
+    payload = {
+        "v": 1,
+        "id": doc_id,
+        "h": doc_hash_hex,
+        "s": b64url_encode(signature),
+        "ts": int(issued_at),
+        "ex": int(expires_at),
+        "alg": algorithm,
+    }
+    payload_json = json.dumps(payload, separators=(",", ":"))
+    parse_payload(payload_json)
+    return payload_json
 
 
 def build_payload(
@@ -54,55 +74,24 @@ def build_payload(
     issued_at: int | None = None,
     expires_at: int | None = None,
     algorithm: str = QR_ALGORITHM,
-) -> dict[str, Any] | str:
-    """
-    Build the JSON payload embedded in the QR.
+) -> str:
+    """Backward-compatible wrapper for existing scripts and callers."""
 
-    The deployed backend uses the online compact dict form. The offline
-    verifier/tests use the minified JSON form with embedded signature.
-
-    Fields:
-        v:        schema version (start at 1)
-        doc_id:   UUID of the signed document
-        hash:     SHA-256 hex of the original PDF (64 chars)
-        url:      verify endpoint URL the scanner should hit
-    """
     offline_requested = any(
         value is not None
         for value in (doc_hash_hex, signature, issued_at, expires_at)
     )
-    if offline_requested:
-        if doc_hash_hex is None:
-            doc_hash_hex = file_hash
-        if doc_hash_hex is None:
-            raise ValueError("doc_hash_hex is required for offline QR payload")
-        if signature is None:
-            raise ValueError("signature is required for offline QR payload")
-        if issued_at is None or expires_at is None:
-            raise ValueError("issued_at and expires_at are required for offline QR payload")
+    if not offline_requested:
+        return build_online_payload(verify_url or "")
 
-        payload = {
-            "v": 1,
-            "id": doc_id,
-            "h": doc_hash_hex,
-            "s": b64url_encode(signature),
-            "ts": int(issued_at),
-            "ex": int(expires_at),
-            "alg": algorithm,
-        }
-        return json.dumps(payload, separators=(",", ":"))
-
-    if file_hash is None:
-        raise ValueError("file_hash is required for online QR payload")
-    if verify_url is None:
-        raise ValueError("verify_url is required for online QR payload")
-
-    return {
-        "v": 1,
-        "doc_id": doc_id,
-        "hash": file_hash,
-        "url": verify_url,
-    }
+    return build_offline_payload(
+        doc_id=doc_id,
+        doc_hash_hex=doc_hash_hex or file_hash or "",
+        signature=signature or b"",
+        issued_at=issued_at if issued_at is not None else 0,
+        expires_at=expires_at if expires_at is not None else 0,
+        algorithm=algorithm,
+    )
 
 
 def parse_payload(payload_json: str) -> dict[str, Any]:
@@ -136,6 +125,8 @@ def parse_payload(payload_json: str) -> dict[str, Any]:
         raise ValueError("ts must be an integer")
     if not isinstance(payload["ex"], int):
         raise ValueError("ex must be an integer")
+    if payload["ex"] <= payload["ts"]:
+        raise ValueError("ex must be greater than ts")
     if not isinstance(payload["alg"], str) or not payload["alg"]:
         raise ValueError("alg must be a non-empty string")
 
@@ -152,7 +143,7 @@ def is_expired(payload: dict[str, Any], now: int | None = None) -> bool:
     return current_time >= expires_at
 
 
-def render_png(payload: dict[str, Any]) -> bytes:
+def render_png(payload: dict[str, Any] | str) -> bytes:
     """
     Render the payload as a PNG-encoded QR code.
 
@@ -166,9 +157,14 @@ def render_png(payload: dict[str, Any]) -> bytes:
         version=None,            # auto-select smallest version that fits
         error_correction=ERROR_CORRECT_M,
         box_size=8,              # 8 pixels per QR module
-        border=2,                # 2-module quiet zone (minimum allowed: 4 by spec, 2 works for most scanners)
+        border=4,                # QR quiet zone minimum for reliable scanning
     )
-    qr.add_data(json.dumps(payload, separators=(",", ":")))
+    encoded_data = (
+        json.dumps(payload, separators=(",", ":"))
+        if isinstance(payload, dict)
+        else payload
+    )
+    qr.add_data(encoded_data)
     qr.make(fit=True)
 
     img = qr.make_image(fill_color="black", back_color="white")

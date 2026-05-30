@@ -8,6 +8,7 @@ Anyone with the QR can verify the document without authentication.
 Every verification attempt is logged to audit_log for non-repudiation.
 """
 import uuid as uuid_lib
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,11 +16,21 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.crypto.falcon_service import get_public_key, verify_signature
+from app.audit_utils import record_audit
+from app.crypto.falcon_service import verify_document as falcon_verify_document
 from app.database import get_session
-from app.models import AuditLog, Document, DocumentStatus, User
+from app.models import Document, DocumentStatus, User
 
 router = APIRouter(tags=["verify"])
+
+
+def is_qr_expired(expires_at: datetime, now: datetime | None = None) -> bool:
+    """Return True when online QR verification metadata has expired."""
+
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    current_time = now or datetime.now(timezone.utc)
+    return current_time >= expires_at
 
 
 async def _log_verify_attempt(
@@ -29,22 +40,15 @@ async def _log_verify_attempt(
     outcome: str,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Insert an audit_log row for a /verify request. Best-effort, swallows errors."""
-    try:
-        log = AuditLog(
-            actor_id=None,  # public endpoint, no authenticated actor
-            action="verify_qr",
-            target_type="document",
-            target_id=doc_id,
-            extra_metadata={"outcome": outcome, **(extra or {})},
-            ip_address=(request.client.host if request.client else None),
-            user_agent=request.headers.get("user-agent"),
-        )
-        session.add(log)
-        await session.commit()
-    except Exception:
-        # Don't let logging failure break the verify response
-        await session.rollback()
+    await record_audit(
+        session,
+        action="verify_qr",
+        outcome=outcome,
+        request=request,
+        target_type="document",
+        target_id=doc_id,
+        extra=extra,
+    )
 
 
 @router.get("/verify")
@@ -107,7 +111,25 @@ async def verify_document(
         await _log_verify_attempt(session, request, d, "not_signed")
         return response
 
-    # Re-read the PDF and verify the signature
+    if doc.signing_public_key is None:
+        response["valid"] = False
+        response["reason"] = "Signing public key missing for this document"
+        await _log_verify_attempt(session, request, d, "public_key_missing")
+        return response
+
+    if doc.qr_expires_at is None:
+        response["valid"] = False
+        response["reason"] = "QR verification metadata has not been issued"
+        await _log_verify_attempt(session, request, d, "qr_not_issued")
+        return response
+
+    if is_qr_expired(doc.qr_expires_at):
+        response["valid"] = False
+        response["reason"] = "QR verification metadata expired"
+        await _log_verify_attempt(session, request, d, "expired")
+        return response
+
+    # Re-read the PDF and verify the signature with its signing-time key.
     file_path = Path(doc.storage_path)
     if not file_path.exists():
         response["valid"] = False
@@ -116,8 +138,12 @@ async def verify_document(
         return response
 
     pdf_bytes = file_path.read_bytes()
-    public_key = get_public_key()
-    is_valid = verify_signature(pdf_bytes, doc.falcon_signature, public_key)
+    is_valid = falcon_verify_document(
+        pdf_bytes,
+        doc.falcon_signature,
+        doc.signing_public_key,
+        expected_hash_hex=doc.file_hash,
+    )
 
     response["valid"] = is_valid
     if not is_valid:

@@ -27,6 +27,9 @@ WorkingDirectory=/home/ubuntu/citizen-portal/backend
 # KEY_PASSPHRASE bắt buộc — backend dùng để giải mã private key admin (FALCON) lúc ký/verify.
 EnvironmentFile=/home/ubuntu/citizen-portal/backend/.env
 
+# Ensure one encrypted server keypair exists before Uvicorn forks workers.
+ExecStartPre=/home/ubuntu/citizen-portal/backend/.venv/bin/python -c "from app.crypto.falcon_service import get_public_key; get_public_key()"
+
 # Bind 127.0.0.1 — chỉ nginx (cùng máy) gọi được, không expose trực tiếp ra ngoài.
 # 2 workers đủ cho demo; tăng nếu cần.
 ExecStart=/home/ubuntu/citizen-portal/backend/.venv/bin/uvicorn app.main:app \

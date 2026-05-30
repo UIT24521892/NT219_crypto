@@ -47,6 +47,8 @@ export default function DocumentsListPage() {
   }
 
   useEffect(() => {
+    // Fetching the initial document list on mount is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadDocuments();
   }, []);
 

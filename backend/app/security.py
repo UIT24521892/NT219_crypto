@@ -19,14 +19,18 @@ BCRYPT_MAX_BYTES = 72
 
 def hash_password(plain_password: str) -> str:
     """Hash a plaintext password with bcrypt. Returns the bcrypt hash string."""
-    password_bytes = plain_password.encode("utf-8")[:BCRYPT_MAX_BYTES]
+    password_bytes = plain_password.encode("utf-8")
+    if len(password_bytes) > BCRYPT_MAX_BYTES:
+        raise ValueError(f"Password must not exceed {BCRYPT_MAX_BYTES} UTF-8 bytes")
     salt = bcrypt.gensalt(rounds=BCRYPT_ROUNDS)
     return bcrypt.hashpw(password_bytes, salt).decode("utf-8")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
     """Constant-time bcrypt verification. Returns True if password matches hash."""
-    password_bytes = plain_password.encode("utf-8")[:BCRYPT_MAX_BYTES]
+    password_bytes = plain_password.encode("utf-8")
+    if len(password_bytes) > BCRYPT_MAX_BYTES:
+        return False
     return bcrypt.checkpw(password_bytes, hashed_password.encode("utf-8"))
 
 

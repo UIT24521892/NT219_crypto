@@ -92,7 +92,14 @@ class Document(Base):
         DateTime(timezone=True), nullable=True
     )
     public_key_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    signing_public_key: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
     qr_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    qr_issued_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    qr_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

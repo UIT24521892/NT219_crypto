@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from app.models import DocumentStatus, UserRole
 
@@ -16,6 +16,13 @@ class RegisterRequest(BaseModel):
     """POST /auth/register body."""
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def password_fits_bcrypt(cls, password: str) -> str:
+        if len(password.encode("utf-8")) > 72:
+            raise ValueError("password must not exceed 72 UTF-8 bytes")
+        return password
 
 
 class LoginRequest(BaseModel):
@@ -56,4 +63,7 @@ class DocumentResponse(BaseModel):
     status: DocumentStatus
     signed_by: Optional[uuid.UUID] = None
     signed_at: Optional[datetime] = None
+    public_key_ref: Optional[str] = None
+    qr_issued_at: Optional[datetime] = None
+    qr_expires_at: Optional[datetime] = None
     created_at: datetime

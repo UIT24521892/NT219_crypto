@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 
 import { useAuth } from "../contexts/AuthContext";
@@ -6,6 +6,7 @@ import {
   getDocument,
   downloadDocument,
   getQrCode,
+  getVerificationPackage,
   signDocument,
 } from "../services/documents";
 
@@ -23,7 +24,7 @@ export default function DocumentDetailPage() {
 
   const verifyUrl = `${window.location.origin}/verify?d=${id}`;
 
-  async function loadDocument() {
+  const loadDocument = useCallback(async () => {
     setLoading(true);
     setMessage("");
 
@@ -39,11 +40,19 @@ export default function DocumentDetailPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [id]);
 
   useEffect(() => {
+    // Fetching route-specific document state is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadDocument();
-  }, [id]);
+  }, [loadDocument]);
+
+  useEffect(() => {
+    return () => {
+      if (qrUrl) URL.revokeObjectURL(qrUrl);
+    };
+  }, [qrUrl]);
 
   async function handleDownload() {
     try {
@@ -104,6 +113,29 @@ export default function DocumentDetailPage() {
       );
     } finally {
       setQrLoading(false);
+    }
+  }
+
+  async function handleDownloadVerificationPackage() {
+    try {
+      const verificationPackage = await getVerificationPackage(id);
+      const blob = new Blob([JSON.stringify(verificationPackage, null, 2)], {
+        type: "application/json",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${id}-verification-package.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setMessageType("error");
+      setMessage(
+        err.response?.data?.detail ||
+          "Không xuất được verification package cho CLI offline."
+      );
     }
   }
 
@@ -222,6 +254,14 @@ export default function DocumentDetailPage() {
               <Link to={`/verify?d=${id}`} style={styles.btnOutline}>
                 Mở trang Verify
               </Link>
+
+              <button
+                type="button"
+                onClick={handleDownloadVerificationPackage}
+                style={styles.btnOutline}
+              >
+                Tải verification package
+              </button>
             </>
           )}
         </div>

@@ -5,14 +5,22 @@ import pytest
 from backend.app.crypto.qr_builder import (
     b64url_decode,
     b64url_encode,
+    build_offline_payload,
+    build_online_payload,
     build_payload,
     is_expired,
     parse_payload,
 )
 
 
+def test_online_payload_is_direct_phone_scannable_url():
+    verify_url = "https://portal.example/verify?d=doc-123"
+
+    assert build_online_payload(verify_url) == verify_url
+
+
 def test_qr_payload_has_exact_required_fields():
-    payload_json = build_payload(
+    payload_json = build_offline_payload(
         doc_id="doc-123",
         doc_hash_hex="a" * 64,
         signature=b"signature-bytes",

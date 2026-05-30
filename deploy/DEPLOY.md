@@ -41,6 +41,13 @@ chmod +x deploy/*.sh
 
 Script tự: cài python3.11/postgres/nginx + **liboqs build deps** (cmake/ninja-build/libssl-dev), tạo DB + user, venv + pip install, **pre-build liboqs** (lần import oqs đầu, ~2-5 phút), sinh `.env` (random DB pass + JWT secret + **KEY_PASSPHRASE**), tạo tables, tạo storage dir.
 
+Nếu deploy đè lên database cũ, chạy migration metadata verify trước khi restart:
+```bash
+cd ~/citizen-portal/backend
+sudo -u postgres psql -d citizen_portal \
+  -f migrations/001_add_document_verification_metadata.sql
+```
+
 > ⚠ **FALCON-512 thật (liboqs):** backend giờ dùng crypto thật, không còn mock. `setup-ec2.sh` đã cài sẵn liboqs deps + pre-build. Lần `import oqs` đầu build C lib mất ~2-5 phút (script chờ sẵn). Nếu build lỗi → check `cmake ninja-build libssl-dev` đã cài.
 >
 > ⚠ **KEY_PASSPHRASE:** dùng để mã hoá private key admin (AES-256-GCM at-rest). `setup-ec2.sh` sinh random vào `.env`. **Không đổi sau khi đã ký doc** — đổi là key cũ giải mã fail (phải xoá `backend/keys/` sinh lại, doc cũ thành invalid).
@@ -57,7 +64,7 @@ source .venv/bin/activate
 sleep 3
 curl -s -X POST http://127.0.0.1:8000/auth/register \
   -H "Content-Type: application/json" \
-  -d '{"email":"admin@portal.vn","password":"ChangeMe123","full_name":"Admin"}'
+  -d '{"email":"admin@portal.vn","password":"ChangeMe123"}'
 # Promote thành admin (enum lưu UPPERCASE trong DB):
 sudo -u postgres psql -d citizen_portal -c \
   "UPDATE users SET role='ADMIN' WHERE email='admin@portal.vn';"

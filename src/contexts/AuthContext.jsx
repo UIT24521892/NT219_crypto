@@ -19,10 +19,8 @@ export function AuthProvider({ children }) {
     try {
       const me = await getMeApi();
       setUser(me);
-      localStorage.setItem("user", JSON.stringify(me));
-    } catch (err) {
+    } catch {
       localStorage.removeItem("access_token");
-      localStorage.removeItem("user");
       setUser(null);
     } finally {
       setLoading(false);
@@ -30,6 +28,8 @@ export function AuthProvider({ children }) {
   }
 
   useEffect(() => {
+    // Fetching the current session once on mount is intentional.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadCurrentUser();
   }, []);
 
@@ -39,7 +39,6 @@ export function AuthProvider({ children }) {
 
     const me = await getMeApi();
     setUser(me);
-    localStorage.setItem("user", JSON.stringify(me));
 
     return me;
   }
@@ -64,6 +63,7 @@ export function AuthProvider({ children }) {
   );
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAuth() {
   const ctx = useContext(AuthContext);
 
