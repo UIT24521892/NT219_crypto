@@ -2,6 +2,8 @@
 Citizen Services Portal — FastAPI backend entry point.
 NT219 Cryptography — Topic 11.
 """
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
@@ -11,12 +13,24 @@ from app.api.auth import router as auth_router
 from app.api.documents import router as documents_router
 from app.api.verify import router as verify_router
 from app.api.audit import router as audit_router
-from app.database import get_session
+from app.database import Base, engine, get_session
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Create tables for a fresh demo DB. Existing schemas still need migrations."""
+
+    from app import models  # noqa: F401
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    yield
 
 app = FastAPI(
     title="Citizen Services Portal",
     description="Public administrative services with FALCON-512 post-quantum signatures",
     version="0.1.0",
+    lifespan=lifespan,
 )
 
 # CORS — cho phép frontend (Vite dev server) gọi API.

@@ -23,6 +23,8 @@ results/
 *.pem
 *.key
 *.key.enc
+*.enc.json
+backend/keys/*.bin
 
 # Editor directories and files
 .vscode/*

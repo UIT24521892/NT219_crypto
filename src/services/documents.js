@@ -46,3 +46,8 @@ export async function getQrCode(id) {
 
   return URL.createObjectURL(res.data);
 }
+
+export async function getVerificationPackage(id) {
+  const res = await api.get(`/documents/${id}/verification-package`);
+  return res.data;
+}

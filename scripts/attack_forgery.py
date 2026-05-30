@@ -15,7 +15,7 @@ if str(REPO_ROOT) not in sys.path:
 
 with contextlib.redirect_stdout(sys.stderr):
     from backend.app.crypto.falcon_service import generate_keypair, sign_document  # noqa: E402
-    from backend.app.crypto.qr_builder import build_payload  # noqa: E402
+    from backend.app.crypto.qr_builder import build_offline_payload  # noqa: E402
     from scripts.verify_qr import verify_qr_payload  # noqa: E402
 
 
@@ -25,7 +25,7 @@ def run_demo() -> dict[str, object]:
     public_key, private_key = generate_keypair()
 
     doc_hash_hex, signature = sign_document(original_pdf, private_key)
-    payload_json = build_payload(
+    payload_json = build_offline_payload(
         doc_id="demo-forgery-attack",
         doc_hash_hex=doc_hash_hex,
         signature=signature,

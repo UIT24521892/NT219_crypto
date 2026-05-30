@@ -9,8 +9,14 @@ from backend.app.crypto.falcon_service import (
     generate_keypair,
     sign_document,
 )
-from backend.app.crypto.qr_builder import build_payload
-from scripts.verify_qr import EXIT_INPUT_ERROR, EXIT_INVALID, EXIT_VALID, verify_qr_payload
+from backend.app.crypto.qr_builder import b64url_encode, build_payload
+from scripts.verify_qr import (
+    EXIT_INPUT_ERROR,
+    EXIT_INVALID,
+    EXIT_VALID,
+    verify_package,
+    verify_qr_payload,
+)
 
 
 pytestmark = pytest.mark.skipif(
@@ -77,6 +83,28 @@ def test_verify_qr_rejects_invalid_payload():
 
     assert verification["valid"] is False
     assert verification["reason"].startswith("invalid_payload")
+
+
+def test_verify_exported_package_accepts_valid_pdf():
+    pdf_bytes = b"%PDF-1.4\nExported offline verification package\n"
+    public_key, payload_json = signed_payload(pdf_bytes)
+    payload = json.loads(payload_json)
+    package_json = json.dumps(
+        {
+            "v": 1,
+            "document_id": payload["id"],
+            "document_hash": payload["h"],
+            "offline_payload": payload_json,
+            "signature_b64url": payload["s"],
+            "algorithm": payload["alg"],
+            "issued_at": payload["ts"],
+            "expires_at": payload["ex"],
+            "public_key_ref": "demo-key",
+            "public_key_b64url": b64url_encode(public_key),
+        }
+    )
+
+    assert verify_package(pdf_bytes, package_json, now=150)["valid"] is True
 
 
 def test_verify_qr_cli_exit_codes(tmp_path):
@@ -148,3 +176,44 @@ def test_verify_qr_cli_exit_codes(tmp_path):
     )
     assert invalid_payload.returncode == EXIT_INPUT_ERROR
     assert json.loads(invalid_payload.stdout)["reason"].startswith("invalid_payload")
+
+
+def test_verify_qr_cli_accepts_exported_package(tmp_path):
+    pdf_bytes = b"%PDF-1.4\nCLI verification package\n"
+    public_key, payload_json = signed_payload(pdf_bytes)
+    payload = json.loads(payload_json)
+    package = {
+        "v": 1,
+        "document_id": payload["id"],
+        "document_hash": payload["h"],
+        "offline_payload": payload_json,
+        "signature_b64url": payload["s"],
+        "algorithm": payload["alg"],
+        "issued_at": payload["ts"],
+        "expires_at": payload["ex"],
+        "public_key_ref": "demo-key",
+        "public_key_b64url": b64url_encode(public_key),
+    }
+    pdf_path = tmp_path / "document.pdf"
+    package_path = tmp_path / "verification-package.json"
+    pdf_path.write_bytes(pdf_bytes)
+    package_path.write_text(json.dumps(package), encoding="utf-8")
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "scripts/verify_qr.py",
+            "--pdf",
+            str(pdf_path),
+            "--package",
+            str(package_path),
+            "--now",
+            "150",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == EXIT_VALID
+    assert json.loads(completed.stdout)["valid"] is True

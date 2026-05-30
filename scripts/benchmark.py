@@ -6,8 +6,10 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import platform
 import sys
 import time
+from importlib import metadata
 from pathlib import Path
 from statistics import mean
 from typing import Any
@@ -208,6 +210,71 @@ def write_csv(rows: list[dict[str, Any]], output_path: Path) -> None:
         writer.writerows(rows)
 
 
+def package_version(package_name: str) -> str:
+    try:
+        return metadata.version(package_name)
+    except metadata.PackageNotFoundError:
+        return "unavailable"
+
+
+def liboqs_version() -> str:
+    if oqs is None:
+        return "unavailable"
+    for attribute_name in ("oqs_version", "get_oqs_version"):
+        attribute = getattr(oqs, attribute_name, None)
+        if callable(attribute):
+            try:
+                return str(attribute())
+            except Exception:
+                pass
+    return "unknown"
+
+
+def write_summary(rows: list[dict[str, Any]], output_path: Path, iterations: int) -> None:
+    """Write reproducibility metadata and measured rows for the report."""
+
+    table_lines = [
+        "| Algorithm | Keygen (ms) | Sign (ms) | Verify (ms) | Public key (B) | Private key (B) | Signature (B) | Available |",
+        "|---|---:|---:|---:|---:|---:|---:|---|",
+    ]
+    table_lines.extend(
+        "| "
+        + " | ".join(
+            str(row[column]) or "N/A"
+            for column in (
+                "algorithm",
+                "keygen_ms_avg",
+                "sign_ms_avg",
+                "verify_ms_avg",
+                "public_key_bytes",
+                "private_key_bytes",
+                "signature_bytes",
+                "available",
+            )
+        )
+        + " |"
+        for row in rows
+    )
+    text = "\n".join(
+        [
+            "# Full Signature Benchmark Summary",
+            "",
+            *table_lines,
+            "",
+            f"- Iterations: {iterations}",
+            f"- OS: {platform.platform()}",
+            f"- CPU: {platform.processor() or 'unknown'}",
+            f"- Python: {platform.python_version()} ({platform.python_implementation()})",
+            f"- cryptography: {package_version('cryptography')}",
+            f"- liboqs-python: {package_version('liboqs-python')}",
+            f"- liboqs: {liboqs_version()}",
+            "",
+        ]
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(text, encoding="utf-8")
+
+
 def print_summary(rows: list[dict[str, Any]]) -> None:
     widths = {
         column: max(len(column), *(len(str(row[column])) for row in rows))
@@ -233,9 +300,15 @@ def main() -> None:
     args = parse_args()
     rows = benchmark_all(args.iterations)
     output_path = REPO_ROOT / "results" / "benchmark.csv"
+    report_csv_path = REPO_ROOT / "report_inputs" / "full_benchmark.csv"
+    report_summary_path = REPO_ROOT / "report_inputs" / "full_benchmark_summary.md"
     write_csv(rows, output_path)
+    write_csv(rows, report_csv_path)
+    write_summary(rows, report_summary_path, args.iterations)
     print_summary(rows)
     print(f"\nSaved CSV: {output_path}")
+    print(f"Saved report CSV: {report_csv_path}")
+    print(f"Saved report summary: {report_summary_path}")
 
 
 if __name__ == "__main__":

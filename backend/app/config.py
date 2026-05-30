@@ -22,8 +22,11 @@ class Settings(BaseSettings):
     jwt_expires_minutes: int = 60
 
     # Upload
-    upload_dir: str = "./uploads"
+    upload_dir: str = "./storage/uploads"
     max_upload_size_mb: int = 10
+
+    # QR verification
+    qr_validity_days: int = 365
 
 
 settings = Settings()

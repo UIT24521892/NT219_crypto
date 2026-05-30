@@ -82,6 +82,7 @@ JWT_ALGORITHM=HS256
 JWT_EXPIRES_MINUTES=60
 UPLOAD_DIR=./storage/uploads
 MAX_UPLOAD_SIZE_MB=10
+QR_VALIDITY_DAYS=365
 KEY_PASSPHRASE=$KEY_PASSPHRASE
 ENV
 chmod 600 "$BACKEND_DIR/.env"
@@ -106,6 +107,12 @@ async def init():
 
 asyncio.run(init())
 " || echo "    ⚠ Tạo bảng thất bại — check app.database có expose Base + engine."
+
+# Sinh keypair trước khi systemd khởi động nhiều worker để tránh race lần đầu.
+./.venv/bin/python -c "
+from app.crypto.falcon_service import get_public_key
+print(f'    FALCON server key ready ({len(get_public_key())} public-key bytes).')
+"
 
 # ── 6. Storage dir ──
 echo "==> [6/6] Tạo storage/uploads"

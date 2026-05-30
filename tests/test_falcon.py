@@ -61,6 +61,16 @@ def test_wrong_public_key_must_fail():
     assert verify_signature(doc_hash_hex, signature, public_key_2) is False
 
 
+def test_old_document_remains_valid_with_its_signing_time_public_key():
+    public_key_a, private_key_a = generate_keypair()
+    public_key_b, _ = generate_keypair()
+    pdf_bytes = b"%PDF-1.4\nDocument signed before key rotation\n"
+    doc_hash_hex, signature = sign_document(pdf_bytes, private_key_a)
+
+    assert verify_signature(doc_hash_hex, signature, public_key_a) is True
+    assert verify_signature(doc_hash_hex, signature, public_key_b) is False
+
+
 def test_hash_changes_when_document_changes():
     original_pdf = b"%PDF-1.4\nOriginal document\n"
     tampered_pdf = b"%PDF-1.4\nOriginal document changed\n"

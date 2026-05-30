@@ -1,152 +1,279 @@
-# Template Frontend — CitizenPortal (NT219)
+# Citizen Services Portal - NT219 Topic 11
 
-Template này thay thế hoàn toàn `src/` cũ. Đã tích hợp đúng với backend của Trung (Member B).
+Cổng dịch vụ công minh họa luồng ký số PDF bằng FALCON-512, tạo QR xác thực
+online và xuất verification package để kiểm tra offline. Backend dùng FastAPI,
+PostgreSQL và `liboqs-python`; frontend dùng React + Vite.
 
-## 1. Cách áp dụng
+## 1. Kiến trúc
+
+```text
+React/Vite
+   |
+   | JWT Bearer token
+   v
+FastAPI -------------------- PostgreSQL
+   |                            |
+   |                            +-- users, documents, audit_log
+   |
+   +-- storage/uploads/<uuid>.pdf
+   +-- keys/falcon_private.enc.json  (AES-256-GCM)
+   +-- keys/falcon_public.bin
+```
+
+Luồng chính:
+
+```text
+Citizen login -> Upload PDF -> Admin signs -> QR generated
+              -> Online verify -> Offline package -> CLI verify
+```
+
+## 2. Quyết định QR
+
+QR online encode trực tiếp URL để camera điện thoại mở ổn định:
+
+```text
+/verify?d=<document_uuid>
+```
+
+Backend lưu metadata `qr_issued_at` và `qr_expires_at`. Endpoint public `/verify`
+đọc PDF hiện tại, kiểm tra expiry và verify FALCON bằng public key đã gắn với
+tài liệu tại thời điểm ký.
+
+Offline package được xuất từ:
+
+```text
+GET /documents/{id}/verification-package
+```
+
+Package chứa public key và payload JSON minified:
+
+```json
+{"v":1,"id":"...","h":"...","s":"...","ts":1700000000,"ex":1800000000,"alg":"FALCON-512"}
+```
+
+## 3. Chuẩn bị local
+
+Yêu cầu:
+
+- Python 3.11+
+- PostgreSQL 14+
+- Node.js và npm
+- `liboqs-python` cùng FALCON-512 mechanism
+
+Tạo database local:
 
 ```bash
-# Trong folder repo frontend hiện tại của C
-cd <path>/NT219_crypto
-
-# Backup src/ cũ nếu muốn xem lại
-mv src src_old
-
-# Giải nén template (mình gửi kèm file zip này)
-unzip template_for_c.zip
-# → src/ mới + .env.development mới sẽ xuất hiện
+sudo -u postgres psql
 ```
 
-Sau đó:
+```sql
+CREATE USER portal_user WITH PASSWORD 'CHANGE_ME';
+CREATE DATABASE citizen_portal OWNER portal_user;
+```
+
+Tạo virtual environment và cài dependency:
 
 ```bash
-npm install                 # cài nốt nếu chưa
-npm run dev                 # khởi động Vite, mặc định port 5173
+python3 -m venv .venv
+PATH=.venv/bin:$PATH pip install -r backend/requirements.txt pytest
 ```
 
-Mở `http://localhost:5173` → phải thấy login page.
+Tạo file môi trường local nhưng không commit:
 
-**Lưu ý:** template KHÔNG đụng vào `package.json`, `vite.config.js`, `index.html` của C — giữ nguyên những file đó.
-
-## 2. Cấu trúc
-
-```
-src/
-├── main.jsx                         entry point
-├── App.jsx                          ★ routes definition
-├── index.css                        global styles tối giản
-├── services/
-│   ├── api.js                       axios instance + interceptors (token tự động)
-│   ├── auth.js                      registerApi, loginApi, meApi
-│   ├── documents.js                 list/get/upload/sign/qr/download
-│   └── verify.js                    verifyDocument (public, không cần auth)
-├── contexts/
-│   └── AuthContext.jsx              ★ provider quản lý user + login/logout
-├── components/
-│   ├── ProtectedRoute.jsx           guard cho route cần auth
-│   └── Layout.jsx                   navbar + content wrapper
-└── pages/
-    ├── LoginPage.jsx                ★ MẪU 1 — đăng nhập (đã có)
-    └── VerifyPage.jsx               ★ MẪU 2 — verify QR target (đã có)
+```bash
+cp backend/.env.example backend/.env
 ```
 
-## 3. Việc của C — viết 4 page còn thiếu
+Các biến quan trọng:
 
-C cần tạo 4 file mới trong `src/pages/`:
-
-### 3.1 `RegisterPage.jsx`
-
-Form đăng ký. Gọi `registerApi({ email, password, full_name })`.
-
-Tham khảo `LoginPage.jsx` (cùng pattern: form + submit + error handling). Sau khi đăng ký thành công → redirect về `/login`.
-
-### 3.2 `DocumentsListPage.jsx`
-
-- Gọi `listDocuments()` lúc mount → hiển thị table
-- Có form upload PDF → gọi `uploadDocument(file)`
-- Mỗi row có link `<Link to={\`/documents/\${doc.id}\`}>`
-
-### 3.3 `DocumentDetailPage.jsx`
-
-- `useParams()` lấy `id`
-- Gọi `getDocument(id)` để có metadata
-- Nút "Tải xuống" → `downloadDocument(id)` rồi mở URL
-- Nếu `doc.status === 'signed'` → nút "Xem QR" → gọi `getQrCode(id)` → hiển thị `<img src={qrUrl} />`
-
-### 3.4 `AdminPage.jsx`
-
-- Chỉ admin vào được (đã guard ở App.jsx)
-- Gọi `listDocuments()` → tất cả docs trong hệ thống
-- Filter `status === 'pending'` → mỗi row có nút "Ký FALCON" → `signDocument(id)` → reload list
-
-## 4. Quan trọng — KHÔNG làm những việc sau
-
-❌ **KHÔNG** dùng `qrcode.react` để tự sinh QR client-side
-→ Backend đã sinh QR PNG sẵn. C gọi `getQrCode(id)` rồi `<img src={blob} />`.
-
-❌ **KHÔNG** verify chữ ký phía client
-→ Backend dùng FALCON-512 thật. Frontend chỉ hiển thị kết quả `valid: true/false` trả từ backend.
-
-❌ **KHÔNG** dùng camera scan QR trong app
-→ User scan QR bằng app camera của điện thoại. URL trong QR sẽ tự mở browser tới `/verify?d=<id>`. Việc của C là làm trang `/verify` đẹp (đã có sẵn `VerifyPage.jsx`).
-
-❌ **KHÔNG** lưu user data dưới `localStorage` ngoài `access_token`
-→ User info luôn fetch từ `/auth/me`. AuthContext đã tự lo.
-
-❌ **KHÔNG** đổi `.env.development` về `VITE_USE_MOCK=true`
-→ Mock mode bị xoá hoàn toàn. Template chạy thẳng với backend thật.
-
-## 5. Test workflow demo
-
-Yêu cầu backend của Trung đang chạy ở `http://localhost:8000`. Test users đã có sẵn trong DB:
-
-| Email | Password | Role |
-|---|---|---|
-| `alice@example.com` | `SecurePass123` | citizen |
-| `bob@example.com` | `BobPass123` | citizen |
-| `admin@example.com` | `AdminPass123` | **admin** |
-
-**Demo flow:**
-
-1. Login bằng `alice@example.com` → vào `/documents`
-2. Upload 1 file PDF → thấy doc xuất hiện với status "pending"
-3. Logout, login lại bằng `admin@example.com` → vào `/admin`
-4. Tìm doc của alice trong list → click "Ký FALCON" → status đổi thành "signed"
-5. Vào `/documents/:id` của doc đó (admin xem được tất cả) → click "Xem QR" → thấy ảnh QR
-6. Lưu QR vào điện thoại, hoặc copy URL trong QR (dùng app QR reader bất kỳ) → mở URL bằng browser khác / incognito → vào trang `/verify?d=...` → thấy ✅ "Tài liệu hợp lệ" + thông tin signer
-
-**Demo tamper:**
-
-7. Trên máy Trung, vào folder `backend/storage/uploads/<doc_id>.pdf` → mở bằng text editor → thêm 1 ký tự bất kỳ → save
-8. Refresh trang `/verify?d=<id>` đó → bây giờ thấy ⚠️ "Tài liệu KHÔNG hợp lệ — Signature verification failed"
-
-→ Đây là **highlight demo** chứng minh FALCON-512 thật sự chống chỉnh sửa.
-
-## 6. CORS
-
-Nếu chạy `npm run dev` mà console thấy lỗi CORS → báo Trung. Backend đã enable CORS cho `localhost:5173`, nhưng nếu C đổi port hoặc dùng IP LAN → cần thêm origin.
-
-## 7. Câu hỏi gửi lại Trung
-
-- [ ] Có cần thêm endpoint `GET /users` (admin xem list users)?
-- [ ] Có cần `DELETE /documents/:id`?
-- [ ] Có cần `PATCH /auth/me`?
-- [ ] Có cần `GET /audit` (admin xem audit log)?
-- [ ] Khi nào C có thể demo thử local với backend chạy thực tế?
-
----
-
-## 8. Tóm tắt thay đổi so với code cũ của C
-
-| Cũ | Mới |
+| Biến | Mục đích |
 |---|---|
-| `VITE_USE_MOCK=true` | xoá hoàn toàn, chạy thẳng với backend |
-| `mockDb.js` (localStorage fake) | xoá, gọi API thật |
-| baseURL `http://localhost:5000/api` | `http://localhost:8000` (env var) |
-| App.jsx monolith, state-based nav | App.jsx routes, react-router-dom |
-| QR tự sinh client (`qrcode.react`) | dùng PNG từ backend |
-| Verify camera scan + so chuỗi base64 | mở URL → backend verify FALCON thật |
-| Field `documentHash`, `documentId` | `file_hash`, `doc_id` (snake_case khớp backend) |
-| Login response `{user, accessToken}` | `{access_token}` → fetch `/auth/me` riêng |
-| `pages/` và `components/` không xài | dùng đúng pattern modular |
+| `DATABASE_URL` | PostgreSQL async connection string |
+| `JWT_SECRET` | Khóa ký JWT; sinh bằng `openssl rand -hex 32` |
+| `KEY_PASSPHRASE` | Passphrase mã hóa private key FALCON bằng AES-256-GCM |
+| `UPLOAD_DIR` | Thư mục PDF, mặc định `./storage/uploads` tính từ `backend/` |
+| `QR_VALIDITY_DAYS` | Thời hạn QR online và offline package |
 
-Mọi vấn đề khi áp dụng template — báo Trung ngay, đừng tự fix lung tung làm sai contract với backend.
+Không commit `.env`, file key, PDF upload hoặc generated key material.
+
+## 4. Chạy backend
+
+```bash
+cd backend
+PATH=../.venv/bin:$PATH uvicorn app.main:app --reload --port 8000
+```
+
+Lần đầu backend khởi động, SQLAlchemy tạo bảng cho database mới. Nếu database
+đã tồn tại từ phiên bản cũ, chạy migration thủ công:
+
+```bash
+cd backend
+psql -h 127.0.0.1 -U portal_user -d citizen_portal \
+  -f migrations/001_add_document_verification_metadata.sql
+```
+
+Tạo admin demo:
+
+```bash
+curl -X POST http://localhost:8000/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@example.com","password":"AdminPass123"}'
+```
+
+```sql
+UPDATE users SET role='ADMIN' WHERE email='admin@example.com';
+```
+
+Health check:
+
+```bash
+curl http://localhost:8000/ping
+curl http://localhost:8000/ping/db
+```
+
+## 5. Chạy frontend
+
+```bash
+npm ci
+npm run dev
+```
+
+Mở `http://localhost:5173`.
+
+Frontend giữ `access_token` trong `localStorage` để demo thuận tiện, nhưng không
+lưu toàn bộ user object. Production nên chuyển sang cookie `HttpOnly` với cấu
+hình CSRF phù hợp.
+
+## 6. Demo online
+
+1. Đăng ký hoặc login citizen.
+2. Upload PDF tại `/documents`.
+3. Login admin và ký tài liệu pending bằng nút `Ký FALCON`.
+4. Mở chi tiết tài liệu và chọn `Xem QR`.
+5. Scan QR bằng camera điện thoại hoặc mở `/verify?d=<document_uuid>`.
+6. Kết quả hợp lệ hiển thị `valid: true`.
+
+Demo tampering:
+
+```bash
+printf 'tampered' >> backend/storage/uploads/<document_uuid>.pdf
+```
+
+Refresh `/verify?d=<document_uuid>`. Kết quả phải là `valid: false`. Chỉ dùng
+file demo và khôi phục file sau khi trình bày.
+
+## 7. Demo offline CLI
+
+Tại trang chi tiết, chọn `Tải verification package`, hoặc tải bằng API:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8000/documents/$DOC_ID/verification-package \
+  -o verification-package.json
+```
+
+Verify PDF mà không cần database:
+
+```bash
+PATH=.venv/bin:$PATH python scripts/verify_qr.py \
+  --pdf document.pdf \
+  --package verification-package.json
+```
+
+CLI cũ với payload và raw public key vẫn được hỗ trợ:
+
+```bash
+PATH=.venv/bin:$PATH python scripts/verify_qr.py \
+  --pdf document.pdf \
+  --payload offline-payload.json \
+  --public-key falcon-public.bin
+```
+
+## 8. Test và security demo
+
+Unit test:
+
+```bash
+PATH=.venv/bin:$PATH python -m pytest -q
+```
+
+Integration test cần backend local, PostgreSQL, admin demo và FALCON:
+
+```bash
+RUN_API_INTEGRATION=1 \
+API_ADMIN_EMAIL=admin@example.com \
+API_ADMIN_PASSWORD=AdminPass123 \
+API_STORAGE_DIR="$PWD/backend/storage/uploads" \
+PATH=.venv/bin:$PATH python -m pytest tests/test_api.py -q
+```
+
+Attack demo:
+
+```bash
+PATH=.venv/bin:$PATH python scripts/attack_forgery.py
+PATH=.venv/bin:$PATH python scripts/attack_replay.py
+```
+
+Security Analysis:
+
+```bash
+PATH=.venv/bin:$PATH python scripts/security_analysis.py --samples 100
+```
+
+Script sinh:
+
+- `report_inputs/security_analysis_summary.md`
+- `report_inputs/security_analysis_frequency.csv`
+
+## 9. Benchmark
+
+```bash
+PATH=.venv/bin:$PATH python scripts/benchmark.py --iterations 20
+PATH=.venv/bin:$PATH python scripts/benchmark_falcon_ecdsa.py --iterations 20 --warmup 3
+```
+
+`scripts/benchmark.py` đo FALCON-512, FALCON-1024, ML-DSA-44/Dilithium2 và
+ECDSA-P256 khi mechanism tương ứng khả dụng. Artifact report:
+
+- `report_inputs/full_benchmark.csv`
+- `report_inputs/full_benchmark_summary.md`
+
+## 10. API chính
+
+| Method | Route | Quyền |
+|---|---|---|
+| `POST` | `/auth/register` | Public |
+| `POST` | `/auth/login` | Public |
+| `GET` | `/auth/me` | Authenticated |
+| `POST` | `/documents/upload` | Authenticated |
+| `GET` | `/documents` | Authenticated |
+| `POST` | `/documents/{id}/sign` | Admin |
+| `POST` | `/documents/{id}/qr` | Owner hoặc admin |
+| `GET` | `/documents/{id}/verification-package` | Owner hoặc admin |
+| `GET` | `/verify?d=<uuid>` | Public |
+| `GET` | `/audit` | Admin |
+
+## 11. Security Notes
+
+- FALCON ký SHA-256 digest của PDF, không tự implement crypto primitive.
+- Private key mã hóa at rest bằng AES-256-GCM; key derivation dùng
+  PBKDF2-HMAC-SHA256 và `KEY_PASSPHRASE`.
+- Endpoint sign tính lại SHA-256 và từ chối nếu file đã đổi sau upload.
+- Mỗi document giữ public key đã dùng lúc ký để key rotation không làm hỏng tài
+  liệu cũ.
+- Login, upload, sign và verify đều ghi audit outcome.
+- Citizen không thể sign và không thể đọc `/audit`.
+
+Threat model chi tiết: `docs/threat-model.md`.
+
+## 12. Deploy EC2
+
+Runbook bare-metal Ubuntu 22.04:
+
+```text
+deploy/DEPLOY.md
+```
+
+Trước feature freeze cần xác nhận PostgreSQL, `citizen-portal-api`, Nginx và TLS
+đều chạy; đồng thời bootstrap keypair một lần trước khi bật nhiều Uvicorn
+workers để tránh race condition lúc sinh key lần đầu.

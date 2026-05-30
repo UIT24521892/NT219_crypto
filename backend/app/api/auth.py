@@ -2,10 +2,11 @@
 Citizen Services Portal — Authentication endpoints.
 POST /auth/register, POST /auth/login, GET /auth/me
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit_utils import record_audit
 from app.auth_middleware import get_current_user
 from app.config import settings
 from app.database import get_session
@@ -55,6 +56,7 @@ async def register(
 @router.post("/login", response_model=TokenResponse)
 async def login(
     body: LoginRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ):
     """Exchange email + password for a JWT access token."""
@@ -63,11 +65,31 @@ async def login(
     )
     user = result.scalar_one_or_none()
     if user is None or not verify_password(body.password, user.password_hash):
+        await record_audit(
+            session,
+            action="login",
+            outcome="invalid_credentials",
+            request=request,
+            actor_id=(user.id if user else None),
+            target_type="user",
+            target_id=(user.id if user else None),
+            extra={"email": str(body.email)},
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid credentials",
         )
     if not user.is_active:
+        await record_audit(
+            session,
+            action="login",
+            outcome="account_disabled",
+            request=request,
+            actor_id=user.id,
+            target_type="user",
+            target_id=user.id,
+            extra={"email": user.email},
+        )
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is disabled",
@@ -76,11 +98,22 @@ async def login(
         subject=str(user.id),
         extra_claims={"role": user.role.value, "email": user.email},
     )
-    return TokenResponse(
+    response = TokenResponse(
         access_token=token,
         token_type="bearer",
         expires_in=settings.jwt_expires_minutes * 60,
     )
+    await record_audit(
+        session,
+        action="login",
+        outcome="success",
+        request=request,
+        actor_id=user.id,
+        target_type="user",
+        target_id=user.id,
+        extra={"email": user.email},
+    )
+    return response
 
 
 @router.get("/me", response_model=UserResponse)
