@@ -46,3 +46,10 @@ backend/storage/
 backend/.env
 __pycache__/
 *.pyc
+
+# Env files (untracked after late-stage security review)
+.env
+.env.local
+.env.*.local
+backend/.env
+backend/.env.local
