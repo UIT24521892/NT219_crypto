@@ -1,0 +1,38 @@
+HƯỚNG DẪN ÁP DỤNG BẢN SỬA FINAL
+
+Các file trong zip này đặt đúng theo path của project. Copy đè vào project gốc.
+
+1) Backend cần copy đè:
+- backend/app/models.py
+- backend/app/schemas.py
+- backend/app/config.py
+- backend/app/api/documents.py
+- backend/app/api/verify.py
+- backend/.env.example
+- deploy/setup-ec2.sh
+- backend/migrations/002_review_trust_registry.sql
+
+2) Frontend cần copy đè:
+- src/services/documents.js
+- src/utils/format.js
+- src/pages/DocumentsListPage.jsx
+- src/pages/DocumentDetailPage.jsx
+- src/pages/AdminPage.jsx
+- src/pages/RegisterPage.jsx
+
+3) Nếu DB đã có bảng cũ, chạy migration PostgreSQL:
+cd backend
+psql "$DATABASE_URL" -f migrations/002_review_trust_registry.sql
+
+Nếu đang dev và muốn reset DB nhanh thì có thể drop/create lại DB rồi để backend create_all tạo bảng mới.
+
+4) Thêm vào backend/.env nếu chưa có:
+QR_EXPIRES_MINUTES=1440
+
+5) Test nhanh:
+- restart backend
+- login citizen -> upload PDF -> status pending_review
+- login admin -> duyệt -> status approved
+- admin ký -> status signed + public_key_ref
+- tạo QR -> mở /verify?d=<doc_id> -> valid=true
+- sửa file PDF trong backend/storage/uploads/<doc_id>.pdf -> verify lại -> valid=false

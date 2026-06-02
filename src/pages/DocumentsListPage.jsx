@@ -3,10 +3,13 @@ import { Link } from "react-router-dom";
 
 import { useAuth } from "../contexts/AuthContext";
 import {
+  approveDocument,
   listDocuments,
-  uploadDocument,
+  rejectDocument,
   signDocument,
+  uploadDocument,
 } from "../services/documents";
+import { formatDate, getStatusLabel, getStatusTone } from "../utils/format";
 
 export default function DocumentsListPage() {
   const { isAdmin } = useAuth();
@@ -16,30 +19,16 @@ export default function DocumentsListPage() {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(false);
-  const [signingId, setSigningId] = useState(null);
+  const [actionId, setActionId] = useState(null);
 
   async function loadDocuments() {
     setLoading(true);
-    setMessage("");
-
     try {
-      const data = await listDocuments();
-
-      if (Array.isArray(data)) {
-        setDocuments(data);
-      } else if (Array.isArray(data.items)) {
-        setDocuments(data.items);
-      } else if (Array.isArray(data.documents)) {
-        setDocuments(data.documents);
-      } else {
-        setDocuments([]);
-      }
+      const data = await listDocuments({ limit: 100 });
+      setDocuments(Array.isArray(data) ? data : data.items || data.documents || []);
     } catch (err) {
       setMessageType("error");
-      setMessage(
-        err.response?.data?.detail ||
-          "Chưa kết nối được backend hoặc API /documents lỗi."
-      );
+      setMessage(err.response?.data?.detail || "Không tải được danh sách tài liệu.");
       setDocuments([]);
     } finally {
       setLoading(false);
@@ -52,7 +41,6 @@ export default function DocumentsListPage() {
 
   async function handleUpload(event) {
     event.preventDefault();
-
     if (!file) {
       setMessageType("warning");
       setMessage("Chọn file PDF trước đã.");
@@ -66,47 +54,54 @@ export default function DocumentsListPage() {
     try {
       await uploadDocument(file);
       setFile(null);
+      event.target.reset();
       setMessageType("success");
-      setMessage("Upload thành công. Backend đã tính SHA-256 cho tài liệu.");
+      setMessage("Upload thành công. Tài liệu đang ở trạng thái chờ duyệt.");
       await loadDocuments();
     } catch (err) {
       setMessageType("error");
-      setMessage(
-        err.response?.data?.detail ||
-          "Upload thất bại. Kiểm tra backend hoặc endpoint /documents/upload."
-      );
+      setMessage(err.response?.data?.detail || "Upload thất bại.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleSign(doc) {
+  async function runAction(doc, action) {
     const docId = doc.id || doc.doc_id;
+    if (!docId) return;
 
-    if (!docId) {
-      setMessageType("error");
-      setMessage("Không tìm thấy document id để ký.");
-      return;
-    }
-
-    setSigningId(docId);
+    setActionId(`${action}:${docId}`);
     setMessageType("info");
-    setMessage("Đang ký tài liệu bằng FALCON-512...");
 
     try {
-      await signDocument(docId);
-      setMessageType("success");
-      setMessage("Ký tài liệu thành công. Trạng thái đã chuyển sang signed.");
+      if (action === "approve") {
+        setMessage("Đang duyệt hồ sơ...");
+        await approveDocument(docId, "Hồ sơ đã được kiểm tra và đủ điều kiện ký.");
+        setMessageType("success");
+        setMessage("Đã duyệt hồ sơ. Bây giờ có thể ký FALCON.");
+      }
+
+      if (action === "reject") {
+        const note = window.prompt("Nhập lý do từ chối:", "Hồ sơ chưa hợp lệ.") || "Hồ sơ chưa hợp lệ.";
+        setMessage("Đang từ chối hồ sơ...");
+        await rejectDocument(docId, note);
+        setMessageType("success");
+        setMessage("Đã từ chối hồ sơ.");
+      }
+
+      if (action === "sign") {
+        setMessage("Đang ký tài liệu bằng FALCON-512...");
+        await signDocument(docId);
+        setMessageType("success");
+        setMessage("Ký tài liệu thành công. Trạng thái đã chuyển sang đã ký.");
+      }
+
       await loadDocuments();
     } catch (err) {
       setMessageType("error");
-      setMessage(
-        err.response?.data?.detail ||
-          err.response?.data?.message ||
-          `Ký thất bại. Status: ${err.response?.status || "Network Error"}`
-      );
+      setMessage(err.response?.data?.detail || `Thao tác ${action} thất bại.`);
     } finally {
-      setSigningId(null);
+      setActionId(null);
     }
   }
 
@@ -116,13 +111,12 @@ export default function DocumentsListPage() {
     return `${hash.slice(0, 14)}...${hash.slice(-10)}`;
   }
 
-  function formatDate(value) {
-    if (!value) return "-";
-    return new Date(value).toLocaleString("vi-VN");
-  }
-
-  const totalSigned = documents.filter((doc) => doc.status === "signed").length;
-  const totalPending = documents.filter((doc) => doc.status === "pending").length;
+  const counts = {
+    total: documents.length,
+    pending: documents.filter((doc) => doc.status === "pending_review").length,
+    approved: documents.filter((doc) => doc.status === "approved").length,
+    signed: documents.filter((doc) => doc.status === "signed").length,
+  };
 
   return (
     <div>
@@ -131,50 +125,33 @@ export default function DocumentsListPage() {
           <p style={styles.kicker}>Quản lý tài liệu</p>
           <h1 style={styles.title}>Danh sách tài liệu</h1>
           <p style={styles.subtitle}>
-            Upload PDF, theo dõi SHA-256 hash và trạng thái ký số FALCON-512.
+            Flow mới: upload → chờ duyệt → approved/rejected → ký FALCON → QR verify.
           </p>
         </div>
       </div>
 
       <div style={styles.statsGrid}>
-        <StatCard label="Tổng tài liệu" value={documents.length} tone="blue" />
-        <StatCard label="Đã ký" value={totalSigned} tone="green" />
-        <StatCard label="Chờ ký" value={totalPending} tone="yellow" />
+        <StatCard label="Tổng tài liệu" value={counts.total} tone="blue" />
+        <StatCard label="Chờ duyệt" value={counts.pending} tone="yellow" />
+        <StatCard label="Đã duyệt" value={counts.approved} tone="blue" />
+        <StatCard label="Đã ký" value={counts.signed} tone="green" />
       </div>
 
       <form onSubmit={handleUpload} style={styles.uploadBox}>
         <div>
           <p style={styles.uploadTitle}>Upload tài liệu PDF</p>
-          <p style={styles.uploadSub}>
-            Backend sẽ kiểm tra định dạng PDF và sinh SHA-256 hash.
-          </p>
+          <p style={styles.uploadSub}>Backend kiểm tra PDF magic bytes, lưu file và tính SHA-256.</p>
         </div>
 
         <div style={styles.uploadActions}>
-          <input
-            type="file"
-            accept=".pdf"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-          />
-
+          <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} />
           <button type="submit" disabled={loading} style={styles.primaryButton}>
             {loading ? "Đang xử lý..." : "Upload PDF"}
           </button>
         </div>
       </form>
 
-      {message && (
-        <p
-          style={{
-            ...styles.message,
-            ...(messageType === "success" ? styles.messageSuccess : {}),
-            ...(messageType === "error" ? styles.messageError : {}),
-            ...(messageType === "warning" ? styles.messageWarning : {}),
-          }}
-        >
-          {message}
-        </p>
-      )}
+      {message && <p style={{ ...styles.message, ...messageStyle(messageType) }}>{message}</p>}
 
       <div style={styles.tableCard}>
         <table style={styles.table}>
@@ -192,63 +169,37 @@ export default function DocumentsListPage() {
           <tbody>
             {documents.length === 0 && (
               <tr>
-                <td colSpan="6" style={styles.emptyTd}>
-                  Chưa có tài liệu hoặc backend chưa trả dữ liệu.
-                </td>
+                <td colSpan="6" style={styles.emptyTd}>Chưa có tài liệu.</td>
               </tr>
             )}
 
             {documents.map((doc) => {
               const docId = doc.id || doc.doc_id;
-              const filename = doc.filename || doc.fileName || "-";
-              const hash = doc.file_hash || doc.fileHash || "-";
               const status = doc.status || "-";
-              const createdAt = doc.created_at || doc.createdAt || "-";
-              const isSigned = status === "signed";
+              const tone = getStatusTone(status);
+              const busy = actionId?.endsWith(`:${docId}`);
 
               return (
                 <tr key={docId}>
-                  <td style={styles.td}>
-                    <span style={styles.docId}>{docId}</span>
-                  </td>
-
-                  <td style={styles.td}>
-                    <strong>{filename}</strong>
-                  </td>
-
-                  <td style={styles.td} title={hash}>
-                    <code style={styles.hash}>{shortHash(hash)}</code>
-                  </td>
-
-                  <td style={styles.td}>
-                    <span
-                      style={{
-                        ...styles.badge,
-                        ...(isSigned ? styles.badgeSigned : styles.badgePending),
-                      }}
-                    >
-                      {isSigned ? "Đã ký" : "Chờ ký"}
-                    </span>
-                  </td>
-
-                  <td style={styles.td}>
-                    {createdAt !== "-" ? formatDate(createdAt) : "-"}
-                  </td>
-
+                  <td style={styles.td}><span style={styles.docId}>{docId}</span></td>
+                  <td style={styles.td}><strong>{doc.filename || "-"}</strong></td>
+                  <td style={styles.td} title={doc.file_hash}><code style={styles.hash}>{shortHash(doc.file_hash)}</code></td>
+                  <td style={styles.td}><span style={{ ...styles.badge, ...badgeStyle(tone) }}>{getStatusLabel(status)}</span></td>
+                  <td style={styles.td}>{formatDate(doc.created_at)}</td>
                   <td style={styles.td}>
                     <div style={styles.actions}>
-                      <Link to={`/documents/${docId}`} style={styles.linkButton}>
-                        Xem
-                      </Link>
+                      <Link to={`/documents/${docId}`} style={styles.linkButton}>Xem</Link>
 
-                      {isAdmin && !isSigned && (
-                        <button
-                          type="button"
-                          onClick={() => handleSign(doc)}
-                          disabled={signingId === docId}
-                          style={styles.signButton}
-                        >
-                          {signingId === docId ? "Đang ký..." : "Ký FALCON"}
+                      {isAdmin && status === "pending_review" && (
+                        <>
+                          <button type="button" disabled={busy} onClick={() => runAction(doc, "approve")} style={styles.approveButton}>Duyệt</button>
+                          <button type="button" disabled={busy} onClick={() => runAction(doc, "reject")} style={styles.rejectButton}>Từ chối</button>
+                        </>
+                      )}
+
+                      {isAdmin && status === "approved" && (
+                        <button type="button" disabled={busy} onClick={() => runAction(doc, "sign")} style={styles.signButton}>
+                          {busy ? "Đang ký..." : "Ký FALCON"}
                         </button>
                       )}
                     </div>
@@ -264,208 +215,55 @@ export default function DocumentsListPage() {
 }
 
 function StatCard({ label, value, tone }) {
-  const toneStyle =
-    tone === "green"
-      ? { background: "#ecfdf5", color: "#047857" }
-      : tone === "yellow"
-      ? { background: "#fffbeb", color: "#92400e" }
-      : { background: "#eff6ff", color: "#1d4ed8" };
-
   return (
     <div style={styles.statCard}>
       <p style={styles.statLabel}>{label}</p>
-      <p style={{ ...styles.statValue, ...toneStyle }}>{value}</p>
+      <p style={{ ...styles.statValue, ...badgeStyle(tone) }}>{value}</p>
     </div>
   );
 }
 
+function badgeStyle(tone) {
+  if (tone === "green") return { background: "#dcfce7", color: "#166534" };
+  if (tone === "yellow") return { background: "#fef3c7", color: "#92400e" };
+  if (tone === "red") return { background: "#fee2e2", color: "#991b1b" };
+  if (tone === "blue") return { background: "#dbeafe", color: "#1d4ed8" };
+  return { background: "#f1f5f9", color: "#475569" };
+}
+
+function messageStyle(type) {
+  if (type === "success") return { background: "#ecfdf5", color: "#047857", borderColor: "#a7f3d0" };
+  if (type === "error") return { background: "#fef2f2", color: "#b91c1c", borderColor: "#fecaca" };
+  if (type === "warning") return { background: "#fffbeb", color: "#92400e", borderColor: "#fde68a" };
+  return {};
+}
+
 const styles = {
-  pageHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    marginBottom: 20,
-  },
-  kicker: {
-    margin: 0,
-    color: "#8b1e1e",
-    fontWeight: 900,
-    textTransform: "uppercase",
-    letterSpacing: 0.8,
-    fontSize: 12,
-  },
-  title: {
-    margin: "4px 0 0",
-    fontSize: 32,
-    color: "#111827",
-  },
-  subtitle: {
-    margin: "8px 0 0",
-    color: "#64748b",
-  },
-  statsGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-    gap: 14,
-    marginBottom: 18,
-  },
-  statCard: {
-    background: "white",
-    border: "1px solid #e2e8f0",
-    borderRadius: 14,
-    padding: 16,
-  },
-  statLabel: {
-    margin: 0,
-    color: "#64748b",
-    fontSize: 13,
-    fontWeight: 700,
-  },
-  statValue: {
-    margin: "10px 0 0",
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    display: "grid",
-    placeItems: "center",
-    fontSize: 22,
-    fontWeight: 900,
-  },
-  uploadBox: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 18,
-    background: "white",
-    padding: 18,
-    borderRadius: 16,
-    margin: "18px 0",
-    border: "1px solid #e2e8f0",
-    boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
-  },
-  uploadTitle: {
-    margin: 0,
-    color: "#111827",
-    fontWeight: 900,
-  },
-  uploadSub: {
-    margin: "4px 0 0",
-    color: "#64748b",
-    fontSize: 13,
-  },
-  uploadActions: {
-    display: "flex",
-    alignItems: "center",
-    gap: 12,
-  },
-  primaryButton: {
-    background: "#8b1e1e",
-    color: "white",
-    border: 0,
-    padding: "10px 14px",
-    borderRadius: 10,
-    cursor: "pointer",
-    fontWeight: 800,
-  },
-  message: {
-    padding: "12px 14px",
-    borderRadius: 12,
-    background: "#eff6ff",
-    color: "#1d4ed8",
-    border: "1px solid #bfdbfe",
-    fontWeight: 650,
-  },
-  messageSuccess: {
-    background: "#ecfdf5",
-    color: "#047857",
-    borderColor: "#a7f3d0",
-  },
-  messageError: {
-    background: "#fef2f2",
-    color: "#b91c1c",
-    borderColor: "#fecaca",
-  },
-  messageWarning: {
-    background: "#fffbeb",
-    color: "#92400e",
-    borderColor: "#fde68a",
-  },
-  tableCard: {
-    background: "white",
-    border: "1px solid #e2e8f0",
-    borderRadius: 16,
-    overflow: "hidden",
-    boxShadow: "0 8px 24px rgba(15,23,42,0.05)",
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-  },
-  th: {
-    textAlign: "left",
-    background: "#f1f5f9",
-    padding: 13,
-    color: "#334155",
-    fontSize: 13,
-    borderBottom: "1px solid #dbe3ee",
-  },
-  td: {
-    padding: 13,
-    borderBottom: "1px solid #eef2f7",
-    verticalAlign: "top",
-    fontSize: 14,
-  },
-  emptyTd: {
-    padding: 28,
-    textAlign: "center",
-    color: "#64748b",
-  },
-  docId: {
-    display: "inline-block",
-    maxWidth: 190,
-    wordBreak: "break-all",
-    color: "#475569",
-    fontSize: 12,
-  },
-  hash: {
-    color: "#7a1414",
-    background: "#fff7ed",
-    padding: "4px 6px",
-    borderRadius: 6,
-  },
-  badge: {
-    display: "inline-block",
-    padding: "5px 10px",
-    borderRadius: 999,
-    fontSize: 12,
-    fontWeight: 900,
-  },
-  badgeSigned: {
-    background: "#dcfce7",
-    color: "#166534",
-  },
-  badgePending: {
-    background: "#fef3c7",
-    color: "#92400e",
-  },
-  actions: {
-    display: "flex",
-    gap: 8,
-    alignItems: "center",
-    flexWrap: "wrap",
-  },
-  linkButton: {
-    color: "#8b1e1e",
-    textDecoration: "none",
-    fontWeight: 900,
-  },
-  signButton: {
-    background: "#047857",
-    color: "white",
-    border: 0,
-    padding: "8px 10px",
-    borderRadius: 9,
-    cursor: "pointer",
-    fontWeight: 800,
-  },
+  pageHeader: { display: "flex", justifyContent: "space-between", marginBottom: 20 },
+  kicker: { margin: 0, color: "#8b1e1e", fontWeight: 900, textTransform: "uppercase", letterSpacing: 0.8, fontSize: 12 },
+  title: { margin: "4px 0 0", fontSize: 32, color: "#111827" },
+  subtitle: { margin: "8px 0 0", color: "#64748b" },
+  statsGrid: { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 14, marginBottom: 18 },
+  statCard: { background: "white", border: "1px solid #e2e8f0", borderRadius: 14, padding: 16 },
+  statLabel: { margin: 0, color: "#64748b", fontSize: 13, fontWeight: 800 },
+  statValue: { margin: "10px 0 0", display: "inline-block", padding: "8px 12px", borderRadius: 999, fontSize: 22, fontWeight: 900 },
+  uploadBox: { background: "white", border: "1px solid #e2e8f0", borderRadius: 16, padding: 18, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, marginBottom: 14 },
+  uploadTitle: { margin: 0, fontWeight: 900, color: "#111827" },
+  uploadSub: { margin: "6px 0 0", color: "#64748b", fontSize: 14 },
+  uploadActions: { display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" },
+  primaryButton: { background: "#8b1e1e", color: "white", border: 0, borderRadius: 10, padding: "10px 14px", fontWeight: 800, cursor: "pointer" },
+  message: { padding: "12px 14px", borderRadius: 12, background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", fontWeight: 700 },
+  tableCard: { background: "white", border: "1px solid #e2e8f0", borderRadius: 16, overflow: "auto", boxShadow: "0 8px 24px rgba(15,23,42,0.05)" },
+  table: { width: "100%", borderCollapse: "collapse", minWidth: 980 },
+  th: { textAlign: "left", padding: "14px 13px", background: "#f8fafc", color: "#475569", fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, borderBottom: "1px solid #e2e8f0" },
+  td: { padding: "13px", borderBottom: "1px solid #f1f5f9", verticalAlign: "middle" },
+  emptyTd: { padding: 30, textAlign: "center", color: "#64748b" },
+  docId: { display: "inline-block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontFamily: "monospace", fontSize: 12 },
+  hash: { color: "#334155", background: "#f8fafc", padding: "4px 6px", borderRadius: 8 },
+  badge: { display: "inline-block", padding: "6px 10px", borderRadius: 999, fontSize: 12, fontWeight: 900 },
+  actions: { display: "flex", gap: 8, flexWrap: "wrap" },
+  linkButton: { border: "1px solid #cbd5e1", color: "#334155", background: "white", borderRadius: 9, padding: "8px 10px", textDecoration: "none", fontWeight: 800 },
+  approveButton: { background: "#1d4ed8", color: "white", border: 0, borderRadius: 9, padding: "8px 10px", fontWeight: 800, cursor: "pointer" },
+  rejectButton: { background: "#b91c1c", color: "white", border: 0, borderRadius: 9, padding: "8px 10px", fontWeight: 800, cursor: "pointer" },
+  signButton: { background: "#047857", color: "white", border: 0, borderRadius: 9, padding: "8px 10px", fontWeight: 800, cursor: "pointer" },
 };

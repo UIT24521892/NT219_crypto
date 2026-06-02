@@ -16,14 +16,17 @@ class Settings(BaseSettings):
     # Database
     database_url: str
 
-    # JWT (sẽ generate ở step sau)
+    # JWT
     jwt_secret: str = ""
     jwt_algorithm: str = "HS256"
     jwt_expires_minutes: int = 60
 
     # Upload
-    upload_dir: str = "./uploads"
+    upload_dir: str = "./storage/uploads"
     max_upload_size_mb: int = 10
+
+    # QR
+    qr_expires_minutes: int = 60 * 24  # 24 giờ cho demo
 
 
 settings = Settings()
