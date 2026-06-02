@@ -1,5 +1,5 @@
-import { Navigate } from "react-router-dom";
+import DocumentsListPage from "./DocumentsListPage";
 
 export default function AdminPage() {
-  return <Navigate to="/documents" replace />;
+  return <DocumentsListPage />;
 }

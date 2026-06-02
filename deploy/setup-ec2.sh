@@ -26,7 +26,7 @@ echo "════════════════════════�
 echo "==> [1/6] apt update + cài packages (gồm liboqs build deps)"
 sudo apt-get update -y
 sudo apt-get install -y \
-    python3.11 python3.11-venv python3.11-dev \
+    python3 python3-venv python3-dev \
     postgresql postgresql-contrib \
     nginx \
     git curl build-essential \
@@ -61,7 +61,7 @@ echo "    DB '$DB_NAME' + user '$DB_USER' ready."
 # ── 3. Python venv + deps ──
 echo "==> [3/6] Tạo venv + pip install"
 cd "$BACKEND_DIR"
-python3.11 -m venv .venv
+python3 -m venv .venv
 ./.venv/bin/pip install --upgrade pip
 ./.venv/bin/pip install -r requirements.txt
 

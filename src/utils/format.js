@@ -12,11 +12,22 @@ export const formatFileSize = (bytes) => {
 
 export const getStatusLabel = (status) => {
   const map = {
-    pending: "Chờ ký",
-    signed: "Đã ký",
+    pending_review: "Chờ duyệt",
+    approved: "Đã duyệt",
     rejected: "Từ chối",
+    signed: "Đã ký",
   };
-  return map[status] || status;
+  return map[status] || status || "-";
+};
+
+export const getStatusTone = (status) => {
+  const map = {
+    pending_review: "yellow",
+    approved: "blue",
+    rejected: "red",
+    signed: "green",
+  };
+  return map[status] || "gray";
 };
 
 export const getFileTypeLabel = (type) => {
