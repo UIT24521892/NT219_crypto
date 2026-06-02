@@ -13,7 +13,6 @@ from typing import Any, Final
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from dotenv import load_dotenv
 
 from .falcon_primitives import ALGORITHM, generate_keypair, resolve_algorithm
 
@@ -75,7 +74,6 @@ def get_key_passphrase() -> bytes:
     committed, stored in the database, or hardcoded in source.
     """
 
-    load_dotenv()
     passphrase = os.environ.get(KEY_PASSPHRASE_ENV)
     if not passphrase:
         raise RuntimeError(

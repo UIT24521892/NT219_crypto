@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from app.models import DocumentStatus, UserRole
 
@@ -16,13 +16,8 @@ class RegisterRequest(BaseModel):
     """POST /auth/register body."""
     email: EmailStr
     password: str = Field(min_length=8, max_length=128)
-
-    @field_validator("password")
-    @classmethod
-    def password_fits_bcrypt(cls, password: str) -> str:
-        if len(password.encode("utf-8")) > 72:
-            raise ValueError("password must not exceed 72 UTF-8 bytes")
-        return password
+    # Frontend có thể gửi full_name; backend hiện chưa lưu, nhưng nhận để không bị lệch contract.
+    full_name: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -51,6 +46,11 @@ class UserResponse(BaseModel):
 
 # ---------- Documents ----------
 
+class ReviewRequest(BaseModel):
+    """Body cho approve/reject. note không bắt buộc."""
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
 class DocumentResponse(BaseModel):
     """Document metadata returned from /documents endpoints."""
     model_config = ConfigDict(from_attributes=True)
@@ -61,9 +61,10 @@ class DocumentResponse(BaseModel):
     file_size: int
     file_hash: str
     status: DocumentStatus
+    reviewed_by: Optional[uuid.UUID] = None
+    reviewed_at: Optional[datetime] = None
+    review_note: Optional[str] = None
     signed_by: Optional[uuid.UUID] = None
     signed_at: Optional[datetime] = None
     public_key_ref: Optional[str] = None
-    qr_issued_at: Optional[datetime] = None
-    qr_expires_at: Optional[datetime] = None
     created_at: datetime
