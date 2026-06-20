@@ -435,6 +435,11 @@ async def sign_document_endpoint(
     duty (the reviewer who approved a document may not also sign it).
     """
 
+    # Capture the actor id up front: after a rollback in the failure path the
+    # ORM instance is expired, and reading current_signer.id there would attempt
+    # lazy IO outside the session greenlet (MissingGreenlet), masking the real error.
+    actor_id = current_signer.id
+
     result = await session.execute(select(Document).where(Document.id == doc_id))
     doc = result.scalar_one_or_none()
     if doc is None:
@@ -560,6 +565,13 @@ async def sign_document_endpoint(
 
         # 4) Build the self-contained signed PDF: stamp the offline QR on page 1
         #    and embed both signatures + key refs in hidden metadata.
+        # Snapshot every value into plain locals first: the build runs in a thread
+        # executor, where touching an (expired) ORM attribute would attempt sync IO
+        # outside the async session greenlet and raise MissingGreenlet.
+        mldsa_key_ref = doc.public_key_ref
+        qr_key_ref = doc.qr_public_key_ref
+        signer_email = current_signer.email
+        issuer_name = agency.name
         signed_pdf_path = file_path.with_name(f"{doc.id}_signed.pdf")
         loop = asyncio.get_running_loop()
         signed_pdf_bytes = await loop.run_in_executor(
@@ -569,12 +581,12 @@ async def sign_document_endpoint(
                 qr_png=render_png(qr_payload_str),
                 mldsa_signature=signature,
                 qr_signature=qr_signature,
-                public_key_ref=doc.public_key_ref,
-                qr_public_key_ref=doc.qr_public_key_ref,
+                public_key_ref=mldsa_key_ref,
+                qr_public_key_ref=qr_key_ref,
                 qr_payload=qr_payload_str,
                 signed_at=signed_at,
-                signer_email=current_signer.email,
-                issuer=agency.name,
+                signer_email=signer_email,
+                issuer=issuer_name,
             ),
         )
         signed_pdf_path.write_bytes(signed_pdf_bytes)
@@ -591,9 +603,20 @@ async def sign_document_endpoint(
         await session.refresh(doc)
     except Exception:
         await session.rollback()
-        await _audit_sign_failure(
-            session, request, current_signer, doc_id, "crypto_or_database_error",
-            "Unable to sign document", status.HTTP_500_INTERNAL_SERVER_ERROR,
+        # Use the pre-captured actor_id: current_signer is expired post-rollback.
+        await record_audit(
+            session,
+            action="sign",
+            outcome="crypto_or_database_error",
+            request=request,
+            actor_id=actor_id,
+            target_type="document",
+            target_id=doc_id,
+            extra={"detail": "Unable to sign document"},
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to sign document",
         )
 
     await record_audit(

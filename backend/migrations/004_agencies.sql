@@ -33,11 +33,14 @@ ALTER TABLE documents ADD COLUMN IF NOT EXISTS signing_agency_id   INTEGER REFER
 ALTER TABLE documents ADD COLUMN IF NOT EXISTS signing_agency_name VARCHAR(200);
 
 -- --- seed a few government bodies ------------------------------------------ --
-INSERT INTO agencies (code, name, level) VALUES
-    ('GOV',  'Chính phủ',                              'central'),
-    ('MOJ',  'Bộ Tư pháp',                             'ministry'),
-    ('MPS',  'Bộ Công an',                             'ministry'),
-    ('UBND', 'Ủy ban Nhân dân cấp tỉnh',               'provincial')
+-- is_active is listed explicitly: when the table was first created by SQLAlchemy
+-- create_all() the column may lack a server-side default, so a bare INSERT would
+-- violate NOT NULL.
+INSERT INTO agencies (code, name, level, is_active) VALUES
+    ('GOV',  'Chính phủ',                'central',    TRUE),
+    ('MOJ',  'Bộ Tư pháp',               'ministry',   TRUE),
+    ('MPS',  'Bộ Công an',               'ministry',   TRUE),
+    ('UBND', 'Ủy ban Nhân dân cấp tỉnh', 'provincial', TRUE)
 ON CONFLICT (code) DO NOTHING;
 
 COMMIT;

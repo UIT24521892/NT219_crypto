@@ -17,6 +17,7 @@ from sqlalchemy import (
     LargeBinary,
     String,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -57,8 +58,12 @@ class Agency(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
     name: Mapped[str] = mapped_column(String(200), nullable=False)
-    level: Mapped[str] = mapped_column(String(40), nullable=False, default="central")
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    level: Mapped[str] = mapped_column(
+        String(40), nullable=False, default="central", server_default="central"
+    )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default=text("true")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
