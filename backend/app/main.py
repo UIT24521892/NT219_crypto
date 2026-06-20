@@ -8,17 +8,22 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 from app.api.auth import router as auth_router
 from app.api.documents import router as documents_router
 from app.api.verify import router as verify_router
 from app.api.audit import router as audit_router
+from app.config import settings
 from app.database import Base, engine, get_session
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     """Create tables for a fresh demo DB. Existing schemas still need migrations."""
+
+    if not settings.jwt_secret:
+        raise RuntimeError("JWT_SECRET environment variable must be set and non-empty")
 
     from app import models  # noqa: F401
 
@@ -33,13 +38,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — cho phép frontend (Vite dev server) gọi API.
-# Thêm origin LAN/EC2 vào danh sách khi deploy.
+# Trust X-Forwarded-For from nginx so audit logs capture real client IPs.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="127.0.0.1")
+
+# CORS — frontend dev server + deployed EC2 origin.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "https://54.169.147.134.nip.io",
     ],
     allow_credentials=True,
     allow_methods=["*"],

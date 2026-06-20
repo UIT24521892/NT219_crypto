@@ -17,8 +17,8 @@ sinh keypair, luu private key MA HOA (backend/keys/falcon_private.enc.json) +
 public key raw (backend/keys/falcon_public.bin). Cac lan sau load + giai ma lai.
 Cache trong RAM (co Lock) de khoi giai ma moi request.
 """
+import asyncio
 from pathlib import Path
-from threading import Lock
 from typing import Tuple
 
 from . import falcon_primitives as fp
@@ -38,54 +38,78 @@ _PRIVATE_KEY_PATH = _KEYS_DIR / "falcon_private.enc.json"
 _PUBLIC_KEY_PATH = _KEYS_DIR / "falcon_public.bin"
 
 _keypair_cache: Tuple[bytes, bytes] | None = None  # (public_key, private_key)
-_lock = Lock()
+_async_lock: asyncio.Lock | None = None
 
 
-def _load_or_create_keys() -> Tuple[bytes, bytes]:
+def _get_lock() -> asyncio.Lock:
+    global _async_lock
+    if _async_lock is None:
+        _async_lock = asyncio.Lock()
+    return _async_lock
+
+
+def _blocking_load_or_create_keys() -> Tuple[bytes, bytes]:
+    """CPU-bound key load/generate — runs in a thread pool executor."""
+    return km.ensure_admin_keypair(_PRIVATE_KEY_PATH, _PUBLIC_KEY_PATH)
+
+
+async def _load_or_create_keys() -> Tuple[bytes, bytes]:
     """
     Tra ve (public_key, private_key) cua server.
 
     Lan dau: ensure_admin_keypair sinh keypair, luu private key ma hoa + public raw.
     Cac lan sau: load + giai ma. Cache trong RAM.
+    Chay trong thread pool de khong block event loop.
     """
     global _keypair_cache
     if _keypair_cache is not None:
         return _keypair_cache
 
-    with _lock:
+    async with _get_lock():
         if _keypair_cache is not None:
             return _keypair_cache
-        # ensure_admin_keypair tra ve (public_key, private_key)
-        public_key, private_key = km.ensure_admin_keypair(
-            _PRIVATE_KEY_PATH, _PUBLIC_KEY_PATH
+        loop = asyncio.get_running_loop()
+        public_key, private_key = await loop.run_in_executor(
+            None, _blocking_load_or_create_keys
         )
         _keypair_cache = (public_key, private_key)
         return _keypair_cache
 
 
 def get_public_key() -> bytes:
-    """Tra ve FALCON public key cua server (897 bytes voi Falcon-512)."""
-    public_key, _ = _load_or_create_keys()
+    """Sync getter — only safe after keys are cached. Use for offline scripts."""
+    if _keypair_cache is None:
+        raise RuntimeError("Keys not loaded yet; call sign_document_async first")
+    public_key, _ = _keypair_cache
     return public_key
 
 
 def sign_document(
     pdf_bytes: bytes,
-    private_key: bytes | None = None,
+    private_key: bytes,
     algorithm: str = ALGORITHM,
-) -> Tuple[bytes, bytes] | tuple[str, bytes]:
+) -> tuple[str, bytes]:
     """
-    Ky document bang FALCON.
-
-    - sign_document(pdf_bytes) -> (signature, public_key): adapter cho backend deploy.
-    - sign_document(pdf_bytes, private_key) -> (doc_hash_hex, signature): API primitive
-      tuong thich voi tests/scripts offline cua Member A.
+    Sign document voi private key cho truoc (offline / test path).
+    Returns (doc_hash_hex, signature).
     """
-    if private_key is not None:
-        return fp.sign_document(pdf_bytes, private_key, algorithm)
+    return fp.sign_document(pdf_bytes, private_key, algorithm)
 
-    public_key, private_key = _load_or_create_keys()
-    _doc_hash_hex, signature = fp.sign_document(pdf_bytes, private_key, algorithm)
+
+async def sign_document_async(
+    pdf_bytes: bytes,
+    algorithm: str = ALGORITHM,
+) -> Tuple[bytes, bytes]:
+    """
+    Sign document voi server keypair (online / deploy path).
+    Loads/creates keys lazily; offloads CPU work to thread pool.
+    Returns (signature, public_key).
+    """
+    public_key, private_key = await _load_or_create_keys()
+    loop = asyncio.get_running_loop()
+    _doc_hash_hex, signature = await loop.run_in_executor(
+        None, lambda: fp.sign_document(pdf_bytes, private_key, algorithm)
+    )
     return signature, public_key
 
 
