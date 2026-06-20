@@ -33,7 +33,7 @@ def test_qr_payload_has_exact_required_fields():
     assert payload == parse_payload(payload_json)
     assert " " not in payload_json
     assert "\n" not in payload_json
-    assert payload["alg"] == "FALCON-512"
+    assert payload["alg"] == "ML-DSA-44"
 
 
 def test_qr_signature_base64url_roundtrip():

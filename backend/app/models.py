@@ -13,6 +13,7 @@ from sqlalchemy import (
     DateTime,
     Enum as SQLEnum,
     ForeignKey,
+    Integer,
     LargeBinary,
     String,
     func,
@@ -26,12 +27,41 @@ from app.database import Base
 class UserRole(str, enum.Enum):
     CITIZEN = "citizen"
     ADMIN = "admin"
+    REVIEWER = "reviewer"
+    SIGNER = "signer"
 
 
 class DocumentStatus(str, enum.Enum):
     PENDING = "pending"
+    PENDING_REVIEW = "pending_review"
+    APPROVED = "approved"
     SIGNED = "signed"
     REJECTED = "rejected"
+
+
+class PublicKeyStatus(str, enum.Enum):
+    ACTIVE = "active"
+    REVOKED = "revoked"
+    EXPIRED = "expired"
+
+
+class Agency(Base):
+    """Government body / state agency on whose behalf a signer issues documents.
+
+    The post-quantum signing key belongs to the State (single issuing key); the
+    agency is the organizational attribution recorded per document and bound into
+    the signed QR + PDF metadata, so a verifier can see which body issued it.
+    """
+    __tablename__ = "agencies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(32), unique=True, nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    level: Mapped[str] = mapped_column(String(40), nullable=False, default="central")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
 
 
 class User(Base):
@@ -49,6 +79,10 @@ class User(Base):
         SQLEnum(UserRole, name="user_role"),
         nullable=False, default=UserRole.CITIZEN,
     )
+    # Which government body a signer/reviewer acts for (NULL for citizens).
+    agency_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("agencies.id"), nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
@@ -62,7 +96,7 @@ class User(Base):
 
 
 class Document(Base):
-    """Tai lieu PDF do citizen upload, co the duoc admin ky bang FALCON."""
+    """Tai lieu PDF do citizen upload; reviewer duyet, signer ky hybrid ML-DSA + Ed25519."""
     __tablename__ = "documents"
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -82,7 +116,26 @@ class Document(Base):
         nullable=False, default=DocumentStatus.PENDING, index=True,
     )
 
-    falcon_signature: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    # --- Review workflow (reviewer approves before a signer can sign) ---
+    reviewed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    review_note: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+
+    # --- Primary post-quantum signature (ML-DSA-44 over SHA-256(PDF)) ---
+    mldsa_signature: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    signing_public_key: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    public_key_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    # --- Offline QR signature (Ed25519 over the QR canonical string) ---
+    qr_signature: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    qr_public_key_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
     signed_by: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -91,8 +144,16 @@ class Document(Base):
     signed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
-    public_key_ref: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
-    signing_public_key: Mapped[Optional[bytes]] = mapped_column(LargeBinary, nullable=True)
+    signed_pdf_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+
+    # Issuing government body (set at sign time). The name is snapshotted so the
+    # displayed issuer always matches what was bound into the signature, even if
+    # the agency is later renamed.
+    signing_agency_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("agencies.id"), nullable=True
+    )
+    signing_agency_name: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+
     qr_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     qr_issued_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
@@ -109,6 +170,45 @@ class Document(Base):
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
+    )
+
+    @property
+    def has_signed_pdf(self) -> bool:
+        """True once the self-contained signed PDF has been generated."""
+        return bool(self.signed_pdf_path)
+
+
+class PublicKey(Base):
+    """Public Key Directory / Trust Registry — one row per issuing public key.
+
+    Holds both the ML-DSA-44 signing key and the Ed25519 QR key, each addressed by
+    a ``key_id`` of the form ``<algorithm>:<fingerprint-prefix>``.
+    """
+    __tablename__ = "public_keys"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    key_id: Mapped[str] = mapped_column(
+        String(100), unique=True, nullable=False, index=True
+    )
+    algorithm: Mapped[str] = mapped_column(String(50), nullable=False)
+    public_key_bytes: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    fingerprint: Mapped[str] = mapped_column(
+        String(64), unique=True, nullable=False, index=True
+    )
+    owner_name: Mapped[str] = mapped_column(
+        String(255), nullable=False, default="Issuing Authority"
+    )
+    status: Mapped[PublicKeyStatus] = mapped_column(
+        SQLEnum(PublicKeyStatus, name="public_key_status"),
+        nullable=False, default=PublicKeyStatus.ACTIVE, index=True,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )
 
 

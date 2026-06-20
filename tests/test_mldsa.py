@@ -1,6 +1,6 @@
 import pytest
 
-from backend.app.crypto.falcon_service import (
+from backend.app.crypto.mldsa_service import (
     ALGORITHM,
     available_signature_algorithms,
     generate_keypair,
@@ -17,8 +17,8 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_algorithm_resolves_to_enabled_falcon_name():
-    assert resolve_algorithm("FALCON-512") == ALGORITHM
+def test_algorithm_resolves_to_enabled_mldsa_name():
+    assert resolve_algorithm("ML-DSA-44") == ALGORITHM
     assert ALGORITHM in available_signature_algorithms()
 
 

@@ -1,8 +1,10 @@
 # Crypto A Workflow And Secrets Guide
 
-Tài liệu này tóm tắt toàn bộ luồng Crypto/Security mà Member A đang phụ trách:
-FALCON-512 signing, encrypted key storage, QR payload, offline verifier, attack demos,
-benchmark, và các file nhạy cảm liên quan.
+Tài liệu này tóm tắt toàn bộ luồng Crypto/Security mà Member A đang phụ trách
+theo sơ đồ hybrid: ML-DSA-44 (CRYSTALS-Dilithium, FIPS 204) là chữ ký hậu lượng
+tử chính (online/PDF metadata), kèm chữ ký Ed25519 cổ điển nhỏ gọn trong QR tự
+chứa để verify offline; cùng encrypted key storage, QR payload, offline verifier,
+attack demos, benchmark, và các file nhạy cảm liên quan.
 
 ## 1. Trạng Thái File Nhạy Cảm Trong Workspace
 
@@ -27,16 +29,24 @@ có thể bị bundle sang frontend nếu đặt sai prefix hoặc dùng sai cá
 
 ## 2. Vai Trò Từng File Crypto
 
-### `backend/app/crypto/falcon_service.py`
+### `backend/app/crypto/mldsa_service.py`
 
-File lõi cho chữ ký FALCON-512:
+File lõi cho chữ ký hậu lượng tử chính ML-DSA-44 (FIPS 204):
 
-- Resolve tên thuật toán `FALCON-512` sang tên thật trong liboqs, ví dụ `Falcon-512`.
+- Resolve tên thuật toán `ML-DSA-44` sang tên thật trong liboqs (`ML-DSA-44`, fallback `Dilithium2` cho build cũ).
 - `generate_keypair()` sinh public/private key bằng `oqs.Signature`.
 - `hash_document(pdf_bytes)` tính SHA-256 hex của PDF/document bytes.
 - `sign_document(pdf_bytes, private_key)` ký SHA-256 digest 32 bytes, không ký trực tiếp toàn bộ PDF.
 - `verify_signature(doc_hash_hex, signature, public_key)` verify chữ ký trên hash.
 - `verify_document(pdf_bytes, signature, public_key, expected_hash_hex)` tính lại hash PDF rồi verify.
+- Chữ ký ML-DSA-44 ~2420 byte, public key ~1312 byte — quá lớn để nhét vào QR, nên verify online / từ metadata PDF.
+
+### `backend/app/crypto/ed25519_qr_service.py`
+
+File cho lớp QR offline:
+
+- Ed25519 là chữ ký **cổ điển** 64 byte (public key 32 byte), đủ nhỏ để nhúng trong QR tự chứa và verify offline ngay tại chỗ bằng Web Crypto.
+- Lưu ý trung thực: Ed25519 KHÔNG phải hậu lượng tử — chỉ là lớp tiện ích UX offline; bảo đảm hậu lượng tử thật sự nằm ở ML-DSA-44.
 
 ### `backend/app/crypto/key_manager.py`
 
@@ -67,7 +77,7 @@ payload = {
     "s": sig_base64url_no_padding,
     "ts": issued_at_unix,
     "ex": expires_at_unix,
-    "alg": "FALCON-512",
+    "alg": "ML-DSA-44",
 }
 ```
 
@@ -92,7 +102,7 @@ Luồng verify:
 2. Đọc QR payload JSON.
 3. Đọc raw public key bytes.
 4. Parse payload bằng `parse_payload()`.
-5. Reject nếu `alg != "FALCON-512"`.
+5. Reject nếu `alg != "ML-DSA-44"`.
 6. Reject nếu payload đã expired.
 7. Decode signature từ `payload["s"]`.
 8. Gọi `verify_document()` với PDF bytes, signature, public key, và expected hash.
@@ -106,7 +116,7 @@ Exit code:
 Output JSON:
 
 ```json
-{"valid":true,"reason":"valid","doc_id":"...","algorithm":"FALCON-512"}
+{"valid":true,"reason":"valid","doc_id":"...","algorithm":"ML-DSA-44"}
 ```
 
 ### `scripts/attack_forgery.py`
@@ -129,13 +139,13 @@ Demo QR expired replay:
 3. Verify tại `now=199`: valid.
 4. Verify tại `now=200`: fail với `expired`.
 
-### `scripts/benchmark_falcon_ecdsa.py`
+### `scripts/benchmark_mldsa_ed25519_ecdsa.py`
 
-Benchmark cuối cho report:
+Benchmark cuối cho report (sơ đồ hybrid):
 
-- Chỉ benchmark `FALCON-512` và `ECDSA-P256`.
+- Benchmark `ML-DSA-44` (PQC chính), `Ed25519` (lớp QR offline cổ điển) và `ECDSA-P256` (baseline cổ điển).
 - Đo keygen/sign/verify bằng `time.perf_counter_ns()`.
-- FALCON ký SHA-256 digest 32 bytes để khớp logic hệ thống ký hash PDF.
+- Tất cả ký SHA-256 digest 32 bytes để khớp logic hệ thống ký hash PDF.
 - ECDSA dùng `SECP256R1` và `utils.Prehashed(hashes.SHA256())`.
 - Ghi output vào `report_inputs/benchmark_results.csv` và `report_inputs/benchmark_summary.md`.
 
@@ -143,7 +153,7 @@ Benchmark cuối cho report:
 
 ### Bước 1: Cài dependency
 
-Python code import FALCON qua module:
+Python code import ML-DSA-44 (qua liboqs) bằng module:
 
 ```python
 import oqs
@@ -190,7 +200,7 @@ public_key, private_key = ensure_admin_keypair(
 
 Nếu chưa có key:
 
-- `generate_keypair()` sinh keypair bằng FALCON-512.
+- `generate_keypair()` sinh keypair bằng ML-DSA-44.
 - Private key được mã hóa AES-256-GCM.
 - Public key được lưu raw bytes.
 
@@ -226,7 +236,7 @@ Sau đó:
 4. Decode signature.
 5. Tính lại SHA-256 của PDF.
 6. So hash PDF hiện tại với hash trong QR.
-7. Verify FALCON signature.
+7. Verify chữ ký ML-DSA-44.
 
 Nếu PDF bị sửa, hash thay đổi nên verify fail.
 Nếu QR hết hạn, verifier reject trước khi verify chữ ký.
@@ -237,10 +247,10 @@ Nếu QR hết hạn, verifier reject trước khi verify chữ ký.
 |---|---:|---|---|---|
 | `.env.development` | Có | Config frontend Vite: API URL, mock flag | Không cần thêm crypto secret | Đang là file project |
 | `.env` | Không | Nếu backend loader dùng `.env`, chỉ chứa `KEY_PASSPHRASE=...` | Có thể tạo local thủ công | Không commit |
-| `.pem` | Không | Project crypto hiện không dùng PEM cho FALCON | Không tạo nếu không có nhu cầu TLS/service khác | Không commit private PEM |
+| `.pem` | Không | Khóa ML-DSA-44 lưu raw bytes, không dùng PEM; chỉ public key Ed25519 của QR mới export PEM khi cần | Không tạo nếu không có nhu cầu | Không commit private PEM |
 | `.key` | Không | Raw public key bytes từ `save_public_key()` | Không tự gõ tay, để code sinh | Không commit theo rule project |
 | `.key.enc` | Không | JSON private key đã mã hóa AES-256-GCM | Không tự gõ tay, để code sinh | Không commit |
-| private key raw bytes | Không ghi file plaintext | Secret key FALCON do liboqs sinh | Không bao giờ paste thủ công | Không commit |
+| private key raw bytes | Không ghi file plaintext | Secret key ML-DSA-44 do liboqs sinh | Không bao giờ paste thủ công | Không commit |
 | QR payload JSON | Có thể sinh runtime | `v,id,h,s,ts,ex,alg` | Backend/script sinh | Có thể lưu làm demo, không chứa private key |
 | benchmark CSV/MD | Có | Số liệu benchmark | Script sinh | Có thể gửi report |
 
@@ -250,7 +260,7 @@ File encrypted private key là JSON do code sinh, ví dụ cấu trúc:
 
 ```json
 {
-  "algorithm": "Falcon-512",
+  "algorithm": "ML-DSA-44",
   "ciphertext": "base64-aes-gcm-ciphertext",
   "created_at": 1700000000,
   "kdf": "PBKDF2HMAC-SHA256",
@@ -281,7 +291,7 @@ Khuyến nghị:
 
 Không nhập thủ công:
 
-- Private key FALCON.
+- Private key ML-DSA-44 (và private key Ed25519 của QR).
 - Public key raw bytes.
 - `.key.enc` JSON.
 - Signature trong QR.
@@ -295,29 +305,31 @@ Trong workspace này `.venv/bin/python` đang là symlink hỏng, nên dùng:
 PYTHONPATH=.venv/lib/python3.12/site-packages python3 -m pytest -q
 PYTHONPATH=.venv/lib/python3.12/site-packages python3 scripts/attack_forgery.py
 PYTHONPATH=.venv/lib/python3.12/site-packages python3 scripts/attack_replay.py
-PYTHONPATH=.venv/lib/python3.12/site-packages python3 scripts/benchmark_falcon_ecdsa.py --iterations 20 --warmup 3
+PYTHONPATH=.venv/lib/python3.12/site-packages python3 scripts/benchmark_mldsa_ed25519_ecdsa.py --iterations 20 --warmup 3
 ```
 
 Nếu venv hoạt động bình thường trên máy khác, dùng dạng chuẩn:
 
 ```bash
 PATH=.venv/bin:$PATH python -m pytest -q
-PATH=.venv/bin:$PATH python scripts/benchmark_falcon_ecdsa.py --iterations 20 --warmup 3
+PATH=.venv/bin:$PATH python scripts/benchmark_mldsa_ed25519_ecdsa.py --iterations 20 --warmup 3
 ```
 
 ## 8. Lỗi Thường Gặp
 
 - Thiếu `KEY_PASSPHRASE`: `key_manager.py` báo RuntimeError.
 - Sai `KEY_PASSPHRASE`: decrypt `.key.enc` fail.
-- Thiếu `oqs`: FALCON signing/verify không chạy, tests liên quan FALCON sẽ skip nếu được cấu hình skip.
+- Thiếu `oqs`: ML-DSA-44 signing/verify không chạy, tests liên quan ML-DSA sẽ skip nếu được cấu hình skip.
 - PDF bị sửa sau khi ký: verifier trả `signature_or_hash_mismatch`.
 - QR hết hạn: verifier trả `expired`.
 - Payload sai schema: verifier trả `invalid_payload`.
-- Algorithm khác `FALCON-512`: verifier trả `unsupported_algorithm`.
+- Algorithm khác `ML-DSA-44`: verifier trả `unsupported_algorithm`.
 
 ## 9. Kết Luận Cho GPT/Reviewer
 
 Member A không tự implement crypto primitive. Hệ thống dùng `liboqs-python` qua `import oqs`
-để ký FALCON-512, ký trên SHA-256 hash của PDF, lưu private key bằng AES-256-GCM với passphrase
-từ môi trường, và đưa signature vào QR payload dạng base64url. File cần nhập thủ công duy nhất là
-biến môi trường local `KEY_PASSPHRASE`; các key file phải do code sinh và không được commit.
+để ký ML-DSA-44 (chữ ký hậu lượng tử chính, FIPS 204) trên SHA-256 hash của PDF, lưu private key
+bằng AES-256-GCM với passphrase từ môi trường, và đưa signature vào verification-package dạng
+base64url; song song một chữ ký Ed25519 cổ điển (không hậu lượng tử, chỉ phục vụ UX offline)
+được nhúng trong QR tự chứa. File cần nhập thủ công duy nhất là biến môi trường local
+`KEY_PASSPHRASE`; các key file phải do code sinh và không được commit.

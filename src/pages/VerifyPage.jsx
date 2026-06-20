@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { verifyDocument } from "../services/verify";
+import { verifyScannedQr } from "../services/qrVerify";
 
 export default function VerifyPage() {
   const [params] = useSearchParams();
@@ -10,6 +11,27 @@ export default function VerifyPage() {
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Offline self-contained QR (Ed25519) verification.
+  const [qrText, setQrText] = useState("");
+  const [offlineResult, setOfflineResult] = useState(null);
+  const [offlineBusy, setOfflineBusy] = useState(false);
+
+  async function handleOfflineVerify(event) {
+    event.preventDefault();
+    const payload = qrText.trim();
+    if (!payload) return;
+    setOfflineBusy(true);
+    setOfflineResult(null);
+    try {
+      const res = await verifyScannedQr(payload);
+      setOfflineResult(res);
+    } catch (err) {
+      setOfflineResult({ valid: false, message: err.message || "Lỗi xác minh offline." });
+    } finally {
+      setOfflineBusy(false);
+    }
+  }
 
   async function runVerify(id) {
     if (!id) {
@@ -60,14 +82,15 @@ export default function VerifyPage() {
             <p style={styles.kicker}>Public Verification</p>
             <h1 style={styles.title}>Cổng xác thực tài liệu</h1>
             <p style={styles.subtitle}>
-              Kiểm tra tính hợp lệ của tài liệu đã ký bằng FALCON-512.
+              Xác minh tài liệu ký hậu lượng tử ML-DSA-44 (online) hoặc mã QR tự
+              chứa Ed25519 (offline, ngay tại chỗ).
             </p>
           </div>
         </div>
 
         {!docId && (
           <form onSubmit={handleManualVerify} style={styles.manualBox}>
-            <p style={styles.manualTitle}>Nhập mã tài liệu để kiểm tra</p>
+            <p style={styles.manualTitle}>Xác minh online theo mã tài liệu (ML-DSA-44)</p>
 
             <div style={styles.manualRow}>
               <input
@@ -83,9 +106,50 @@ export default function VerifyPage() {
             </div>
 
             <p style={styles.note}>
-              QR code sẽ tự mở trang dạng <code>/verify?d=&lt;document_id&gt;</code>.
+              QR online sẽ tự mở trang dạng <code>/verify?d=&lt;document_id&gt;</code>.
             </p>
           </form>
+        )}
+
+        <form onSubmit={handleOfflineVerify} style={styles.manualBox}>
+          <p style={styles.manualTitle}>Xác minh offline mã QR tự chứa (Ed25519)</p>
+          <textarea
+            value={qrText}
+            onChange={(e) => setQrText(e.target.value)}
+            placeholder="Dán chuỗi QR tự chứa (b64url(sig)|doc_id|hash|...)"
+            style={styles.qrInput}
+          />
+          <button type="submit" disabled={offlineBusy} style={styles.btnPrimary}>
+            {offlineBusy ? "Đang xác minh..." : "Xác minh offline"}
+          </button>
+          <p style={styles.note}>
+            Chữ ký được kiểm bằng Web Crypto ngay trên trình duyệt — không gửi dữ
+            liệu lên máy chủ (khoá công khai lấy từ Trust Registry, sau đó cache).
+          </p>
+        </form>
+
+        {offlineResult && (
+          <div style={offlineResult.valid ? styles.successBox : styles.dangerBox}>
+            <h2 style={styles.boxTitle}>
+              {offlineResult.valid ? "✅ QR hợp lệ (offline)" : "❌ QR không hợp lệ"}
+            </h2>
+            <p style={styles.boxText}>{offlineResult.message}</p>
+            {offlineResult.fields && (
+              <div style={styles.resultGrid}>
+                <Info label="Document ID" value={offlineResult.fields.doc_id} />
+                <Info label="Cơ quan phát hành" value={offlineResult.fields.issuer} />
+                <Info label="Người ký" value={offlineResult.fields.signer_email} />
+                <Info label="Hiệu lực từ" value={formatDate(offlineResult.fields.valid_from)} />
+                <Info label="Hiệu lực đến" value={formatDate(offlineResult.fields.valid_until)} />
+                <Info label="QR key ref" value={offlineResult.fields.qr_public_key_ref} />
+                <Info
+                  label="Nguồn khoá"
+                  value={offlineResult.keySource || "-"}
+                />
+                <Info label="SHA-256" value={offlineResult.fields.file_hash} wide />
+              </div>
+            )}
+          </div>
         )}
 
         {loading && <div style={styles.infoBox}>Đang xác minh tài liệu...</div>}
@@ -105,7 +169,7 @@ export default function VerifyPage() {
 
             <p style={styles.boxText}>
               {isValid
-                ? "Chữ ký FALCON-512 đã được xác minh thành công."
+                ? "Chữ ký ML-DSA-44 (hậu lượng tử) đã được xác minh thành công."
                 : result.reason || "Backend trả kết quả invalid."}
             </p>
 
@@ -113,6 +177,7 @@ export default function VerifyPage() {
               <Info label="Document ID" value={result.doc_id} />
               <Info label="Tên file" value={result.filename} />
               <Info label="Trạng thái" value={result.status} />
+              <Info label="Cơ quan phát hành" value={result.issuing_agency || "-"} />
               <Info label="Người ký" value={result.signer_email || "-"} />
               <Info label="Thời gian ký" value={formatDate(result.signed_at)} />
               <Info label="Public key ref" value={result.public_key_ref || "-"} />
@@ -220,6 +285,18 @@ const styles = {
     borderRadius: 10,
     border: "1px solid #cbd5e1",
     fontSize: 14,
+  },
+  qrInput: {
+    width: "100%",
+    minHeight: 90,
+    padding: "11px 12px",
+    borderRadius: 10,
+    border: "1px solid #cbd5e1",
+    fontSize: 13,
+    fontFamily: "monospace",
+    boxSizing: "border-box",
+    marginBottom: 10,
+    resize: "vertical",
   },
   btnPrimary: {
     background: "#8b1e1e",

@@ -19,7 +19,7 @@ def test_encrypted_private_key_roundtrip(tmp_path, monkeypatch):
     payload = json.loads(encrypted.decode("utf-8"))
     assert payload["version"] == 1
     assert payload["kdf"] == key_manager.KDF_NAME
-    assert payload["algorithm"] == "FALCON-512"
+    assert payload["algorithm"] == "ML-DSA-44"
     assert key_manager.load_encrypted_private_key(private_path) == private_key
 
     if os.name == "posix":
@@ -55,7 +55,7 @@ def test_ensure_admin_keypair_generates_and_loads(tmp_path, monkeypatch):
     monkeypatch.setattr(
         key_manager,
         "resolve_algorithm",
-        lambda preferred=key_manager.ALGORITHM: "FALCON-512",
+        lambda preferred=key_manager.ALGORITHM: "ML-DSA-44",
     )
 
     private_path = tmp_path / "keys" / "admin_private.key.enc"

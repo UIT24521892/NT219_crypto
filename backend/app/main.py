@@ -14,6 +14,8 @@ from app.api.auth import router as auth_router
 from app.api.documents import router as documents_router
 from app.api.verify import router as verify_router
 from app.api.audit import router as audit_router
+from app.api.public_keys import router as public_keys_router
+from app.api.agencies import router as agencies_router
 from app.config import settings
 from app.database import Base, engine, get_session
 
@@ -33,7 +35,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Citizen Services Portal",
-    description="Public administrative services with FALCON-512 post-quantum signatures",
+    description="Public administrative services with ML-DSA-44 post-quantum signatures",
     version="0.1.0",
     lifespan=lifespan,
 )
@@ -58,6 +60,8 @@ app.include_router(auth_router)
 app.include_router(documents_router)
 app.include_router(verify_router)
 app.include_router(audit_router)
+app.include_router(public_keys_router)
+app.include_router(agencies_router)
 
 
 @app.get("/ping", tags=["health"])

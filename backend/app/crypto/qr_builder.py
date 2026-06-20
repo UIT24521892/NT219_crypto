@@ -6,7 +6,7 @@ from io import BytesIO
 from typing import Any, Final
 
 
-QR_ALGORITHM: Final[str] = "FALCON-512"
+QR_ALGORITHM: Final[str] = "ML-DSA-44"
 OFFLINE_PAYLOAD_FIELDS: Final[set[str]] = {"v", "id", "h", "s", "ts", "ex", "alg"}
 
 

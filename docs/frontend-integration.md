@@ -134,7 +134,7 @@ Response:
 
 &#x20; "signature": "...",
 
-&#x20; "algorithm": "FALCON-512",
+&#x20; "algorithm": "ML-DSA-44",
 
 &#x20; "qrCodeData": "..."
 
@@ -154,7 +154,7 @@ Request:
 
 &#x20; "signature": "...",
 
-&#x20; "algorithm": "FALCON-512"
+&#x20; "algorithm": "ML-DSA-44"
 
 }
 
@@ -168,7 +168,7 @@ Response:
 
 &#x20; "message": "Signature verified",
 
-&#x20; "algorithm": "FALCON-512",
+&#x20; "algorithm": "ML-DSA-44",
 
 &#x20; "documentHash": "...",
 

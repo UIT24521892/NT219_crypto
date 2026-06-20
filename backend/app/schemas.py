@@ -45,11 +45,35 @@ class UserResponse(BaseModel):
     id: uuid.UUID
     email: EmailStr
     role: UserRole
+    agency_id: Optional[int] = None
     is_active: bool
     created_at: datetime
 
 
+# ---------- Agencies (issuing government bodies) ----------
+
+class AgencyResponse(BaseModel):
+    """A government body / state agency on whose behalf signers issue documents."""
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    code: str
+    name: str
+    level: str
+
+
+class AssignAgencyRequest(BaseModel):
+    """Admin assigns (or clears) the agency a signer/reviewer acts for."""
+    user_email: EmailStr
+    agency_code: Optional[str] = Field(default=None, max_length=32)
+
+
 # ---------- Documents ----------
+
+class ReviewRequest(BaseModel):
+    """POST /documents/{id}/approve and /reject body."""
+    note: Optional[str] = Field(default=None, max_length=2000)
+
 
 class DocumentResponse(BaseModel):
     """Document metadata returned from /documents endpoints."""
@@ -61,9 +85,16 @@ class DocumentResponse(BaseModel):
     file_size: int
     file_hash: str
     status: DocumentStatus
+    reviewed_by: Optional[uuid.UUID] = None
+    reviewed_at: Optional[datetime] = None
+    review_note: Optional[str] = None
     signed_by: Optional[uuid.UUID] = None
     signed_at: Optional[datetime] = None
+    signing_agency_id: Optional[int] = None
+    signing_agency_name: Optional[str] = None
+    has_signed_pdf: bool = False
     public_key_ref: Optional[str] = None
+    qr_public_key_ref: Optional[str] = None
     qr_issued_at: Optional[datetime] = None
     qr_expires_at: Optional[datetime] = None
     created_at: datetime

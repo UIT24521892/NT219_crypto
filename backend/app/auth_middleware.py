@@ -58,3 +58,23 @@ async def require_admin(current_user: User = Depends(get_current_user)) -> User:
             detail="Admin role required",
         )
     return current_user
+
+
+async def require_reviewer(current_user: User = Depends(get_current_user)) -> User:
+    """Guard: reviewers (or admins as super-user) may approve/reject documents."""
+    if current_user.role not in (UserRole.REVIEWER, UserRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Reviewer role required",
+        )
+    return current_user
+
+
+async def require_signer(current_user: User = Depends(get_current_user)) -> User:
+    """Guard: signers (or admins as super-user) may sign approved documents."""
+    if current_user.role not in (UserRole.SIGNER, UserRole.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Signer role required",
+        )
+    return current_user

@@ -7,7 +7,7 @@
 - Minimum changed digest bits: 111
 - Maximum changed digest bits: 143
 
-## FALCON Signature Byte Distribution
+## ML-DSA-44 Signature Byte Distribution
 
 - Available: True
 - Signature samples: 100

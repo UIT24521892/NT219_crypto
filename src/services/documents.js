@@ -39,6 +39,24 @@ export async function signDocument(id) {
   return res.data;
 }
 
+export async function approveDocument(id, note) {
+  const res = await api.post(`/documents/${id}/approve`, { note: note || null });
+  return res.data;
+}
+
+export async function rejectDocument(id, note) {
+  const res = await api.post(`/documents/${id}/reject`, { note });
+  return res.data;
+}
+
+export async function downloadSignedDocument(id) {
+  const res = await api.get(`/documents/${id}/signed-download`, {
+    responseType: "blob",
+  });
+
+  return res.data;
+}
+
 export async function getQrCode(id) {
   const res = await api.post(`/documents/${id}/qr`, null, {
     responseType: "blob",

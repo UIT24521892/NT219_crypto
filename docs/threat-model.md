@@ -3,15 +3,19 @@
 ## 1. Scope
 
 The portal accepts citizen PDF uploads, allows an admin to sign approved files
-with FALCON-512, publishes a URL-based online QR code, and exports a signed
-offline verification package.
+with ML-DSA-44 (CRYSTALS-Dilithium, NIST FIPS 204) as the primary post-quantum
+signature, publishes a URL-based online QR code, and exports a signed offline
+verification package. A second, classical Ed25519 signature is embedded in a
+self-contained QR for offline on-the-spot verification (Ed25519 is NOT
+post-quantum; it is an offline-UX convenience while ML-DSA-44 provides the real
+quantum-resistance guarantee).
 
 Protected assets:
 
 - Citizen accounts and JWT access tokens.
 - Uploaded PDF bytes and their SHA-256 hashes.
-- FALCON private key material.
-- Signing-time FALCON public keys.
+- ML-DSA-44 private key material (and the Ed25519 QR private key).
+- Signing-time ML-DSA-44 and Ed25519 public keys.
 - QR verification metadata and audit logs.
 
 ## 2. Trust Boundaries
@@ -29,12 +33,12 @@ Protected assets:
 | Threat | STRIDE | Risk | Mitigation | Evidence |
 |---|---|---|---|---|
 | JWT forgery | Spoofing | Attacker impersonates citizen or admin | Verify HS256 JWT signature and expiry; load active user from DB; enforce `require_admin` | `backend/app/security.py`, `backend/app/auth_middleware.py`; manual citizen sign test |
-| PDF tampering after signing | Tampering | Modified PDF appears authentic | Re-read PDF and verify its FALCON signature with the signing-time public key | `scripts/attack_forgery.py`; online tamper demo |
+| PDF tampering after signing | Tampering | Modified PDF appears authentic | Re-read PDF and verify its ML-DSA-44 signature with the signing-time public key | `scripts/attack_forgery.py`; online tamper demo |
 | PDF tampering before signing | Tampering | Server signs bytes different from uploaded hash | Recompute SHA-256 immediately before sign and reject mismatch | `backend/app/api/documents.py`; integration test |
 | QR replay after expiry | Spoofing / Replay | Old QR remains accepted indefinitely | Store `qr_expires_at`; reject expired online QR metadata; enforce `ex` in offline CLI | `scripts/attack_replay.py`; integration test |
 | Private key leakage | Information disclosure | Attacker can create signatures | Encrypt private key at rest using AES-256-GCM and PBKDF2-HMAC-SHA256; source passphrase from `KEY_PASSPHRASE` | `backend/app/crypto/key_manager.py`, `tests/test_key_manager.py` |
 | Key rotation breaks old documents | Denial of service | Old valid files become unverifiable | Store `signing_public_key` on every signed document and verify with that key | `backend/app/models.py`, `backend/app/api/verify.py` |
-| DB tampering | Tampering | Signature metadata or paths are modified | FALCON verification detects inconsistent signature/PDF combinations; audit logs retain outcomes | Online verify invalid demo |
+| DB tampering | Tampering | Signature metadata or paths are modified | ML-DSA-44 verification detects inconsistent signature/PDF combinations; audit logs retain outcomes | Online verify invalid demo |
 | IDOR document access | Information disclosure | Citizen reads another citizen's file | Owner-or-admin lookup returns 404 for unauthorized access | `_get_doc_or_404()` and integration test |
 | Citizen signs documents | Elevation of privilege | Citizen creates official signed records | Protect sign route with `require_admin` | Manual and integration RBAC tests |
 | Citizen reads audit records | Information disclosure | Security log metadata leaks | Protect `/audit` with `require_admin` | Manual and integration RBAC tests |
@@ -49,12 +53,19 @@ Online QR codes encode a public URL:
 ```
 
 The server checks document status, signing-time public key, QR expiry, file
-presence, SHA-256 digest and FALCON signature.
+presence, SHA-256 digest and the ML-DSA-44 signature.
+
+A separate self-contained QR carries a classical Ed25519 (64-byte) signature so a
+verifier can confirm a paper document offline with Web Crypto in the browser,
+without contacting the server. Ed25519 is NOT post-quantum and is an offline-UX
+convenience only; the post-quantum guarantee is ML-DSA-44, whose ~2420-byte
+signature is too large for a QR and is therefore verified online / from PDF
+metadata.
 
 Offline verification packages contain the minified signed payload:
 
 ```json
-{"v":1,"id":"...","h":"...","s":"...","ts":1700000000,"ex":1800000000,"alg":"FALCON-512"}
+{"v":1,"id":"...","h":"...","s":"...","ts":1700000000,"ex":1800000000,"alg":"ML-DSA-44"}
 ```
 
 The package also carries the signing-time public key encoded as unpadded
@@ -65,7 +76,7 @@ Base64URL so `scripts/verify_qr.py` can verify without database access.
 - Local Uvicorn runs do not apply the Nginx `/verify` rate limit used by EC2.
 - Existing PostgreSQL databases must apply
   `backend/migrations/001_add_document_verification_metadata.sql`.
-- FALCON key initialization should occur once before starting multiple Uvicorn
-  workers to avoid a first-start race.
+- ML-DSA-44 (and Ed25519 QR) key initialization should occur once before starting
+  multiple Uvicorn workers to avoid a first-start race.
 - `access_token` remains in `localStorage` for demo convenience. A production
   deployment should prefer a hardened `HttpOnly` cookie design.

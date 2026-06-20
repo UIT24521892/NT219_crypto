@@ -1,10 +1,41 @@
+import { useEffect, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { listAgencies } from "../services/agencies";
+
+const ROLE_LABEL = {
+  admin: "Quản trị viên",
+  reviewer: "Người duyệt",
+  signer: "Người ký",
+  citizen: "Công dân",
+};
 
 export default function Layout() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, role, agencyId, isAdmin, isReviewer, isSigner } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Resolve the staff member's agency name for display (signers act for one).
+  const [agencyName, setAgencyName] = useState("");
+  useEffect(() => {
+    if (agencyId == null) {
+      // Clearing the resolved name when the user has no agency is intentional.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setAgencyName("");
+      return;
+    }
+    let active = true;
+    listAgencies()
+      .then((list) => {
+        if (!active) return;
+        const match = (Array.isArray(list) ? list : []).find((a) => a.id === agencyId);
+        setAgencyName(match?.name || "");
+      })
+      .catch(() => active && setAgencyName(""));
+    return () => {
+      active = false;
+    };
+  }, [agencyId]);
 
   function handleLogout() {
     logout();
@@ -29,7 +60,8 @@ export default function Layout() {
         <div style={styles.userCard}>
           <p style={styles.userLabel}>Tài khoản</p>
           <p style={styles.userEmail}>{user?.email || "user@example.com"}</p>
-          <span style={styles.roleBadge}>{isAdmin ? "Quản trị viên" : "Công dân"}</span>
+          <span style={styles.roleBadge}>{ROLE_LABEL[role] || "Công dân"}</span>
+          {agencyName && <p style={styles.agencyLine}>🏛️ {agencyName}</p>}
         </div>
 
         <nav style={styles.nav}>
@@ -44,16 +76,42 @@ export default function Layout() {
             <span>Quản lý tài liệu</span>
           </Link>
 
+          {isReviewer && (
+            <Link
+              style={{
+                ...styles.navItem,
+                ...(isActive("/review") ? styles.navItemActive : {}),
+              }}
+              to="/review"
+            >
+              <span>🛡️</span>
+              <span>Hàng chờ duyệt</span>
+            </Link>
+          )}
+
+          {isSigner && (
+            <Link
+              style={{
+                ...styles.navItem,
+                ...(isActive("/sign") ? styles.navItemActive : {}),
+              }}
+              to="/sign"
+            >
+              <span>✍️</span>
+              <span>Hàng chờ ký</span>
+            </Link>
+          )}
+
           {isAdmin && (
             <Link
               style={{
                 ...styles.navItem,
-                ...(isActive("/admin") ? styles.navItemActive : {}),
+                ...(isActive("/agencies") ? styles.navItemActive : {}),
               }}
-              to="/admin"
+              to="/agencies"
             >
-              <span>🛡️</span>
-              <span>Quản trị ký số</span>
+              <span>🏛️</span>
+              <span>Quản lý cơ quan</span>
             </Link>
           )}
 
@@ -161,6 +219,12 @@ const styles = {
     borderRadius: 999,
     fontSize: 12,
     fontWeight: 800,
+  },
+  agencyLine: {
+    margin: "8px 0 0",
+    color: "#f9d6d6",
+    fontSize: 12,
+    fontWeight: 700,
   },
   nav: {
     display: "flex",
