@@ -105,7 +105,7 @@ async def verify_document(
         response["signer_email"] = None
 
     # Cannot verify a doc that was never signed
-    if doc.status != DocumentStatus.SIGNED or doc.falcon_signature is None:
+    if doc.status != DocumentStatus.SIGNED or doc.mldsa_signature is None:
         response["valid"] = False
         response["reason"] = f"Document not signed (status={doc.status.value})"
         await _log_verify_attempt(session, request, d, "not_signed")
@@ -140,7 +140,7 @@ async def verify_document(
     pdf_bytes = file_path.read_bytes()
     is_valid = mldsa_verify_document(
         pdf_bytes,
-        doc.falcon_signature,
+        doc.mldsa_signature,
         doc.signing_public_key,
         expected_hash_hex=doc.file_hash,
     )

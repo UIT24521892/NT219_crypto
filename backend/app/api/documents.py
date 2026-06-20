@@ -66,7 +66,7 @@ def _require_signed_material(doc: Document) -> None:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Document not signed (status={doc.status.value})",
         )
-    if doc.falcon_signature is None or doc.signing_public_key is None:
+    if doc.mldsa_signature is None or doc.signing_public_key is None:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Signed document is missing verification key material",
@@ -322,7 +322,7 @@ async def sign_document_endpoint(
 
     try:
         signature, public_key = await mldsa_sign(pdf_bytes)
-        doc.falcon_signature = signature
+        doc.mldsa_signature = signature
         doc.signing_public_key = public_key
         doc.signed_by = current_admin.id
         doc.signed_at = datetime.now(timezone.utc)
@@ -402,7 +402,7 @@ async def export_verification_package(
     offline_payload = build_offline_payload(
         doc_id=str(doc.id),
         doc_hash_hex=doc.file_hash,
-        signature=doc.falcon_signature,
+        signature=doc.mldsa_signature,
         issued_at=_unix_timestamp(doc.qr_issued_at),
         expires_at=_unix_timestamp(doc.qr_expires_at),
     )
@@ -411,7 +411,7 @@ async def export_verification_package(
         "document_id": str(doc.id),
         "document_hash": doc.file_hash,
         "offline_payload": offline_payload,
-        "signature_b64url": b64url_encode(doc.falcon_signature),
+        "signature_b64url": b64url_encode(doc.mldsa_signature),
         "algorithm": QR_ALGORITHM,
         "issued_at": _unix_timestamp(doc.qr_issued_at),
         "expires_at": _unix_timestamp(doc.qr_expires_at),
