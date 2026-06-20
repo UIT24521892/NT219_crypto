@@ -23,7 +23,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit_utils import record_audit
-from app.auth_middleware import get_current_user, require_admin
+from app.auth_middleware import (
+    get_current_user,
+    require_admin,
+    require_reviewer,
+    require_signer,
+)
 from app.config import settings
 from app.crypto.mldsa_service import sign_document_async as mldsa_sign
 from app.crypto.qr_builder import (
@@ -35,13 +40,20 @@ from app.crypto.qr_builder import (
 )
 from app.database import get_session
 from app.models import Document, DocumentStatus, User, UserRole
-from app.schemas import DocumentResponse
+from app.schemas import DocumentResponse, ReviewRequest
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
 PDF_MAGIC = b"%PDF-"
 CHUNK_SIZE = 8192
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+
+# Staff roles can see and act on every document; citizens only see their own.
+STAFF_ROLES = (UserRole.ADMIN, UserRole.REVIEWER, UserRole.SIGNER)
+
+
+def _is_staff(user: User) -> bool:
+    return user.role in STAFF_ROLES
 
 
 def resolve_upload_dir() -> Path:
@@ -87,7 +99,7 @@ async def _get_doc_or_404(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
         )
-    if current_user.role != UserRole.ADMIN and doc.uploader_id != current_user.id:
+    if not _is_staff(current_user) and doc.uploader_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Document not found",
@@ -201,7 +213,7 @@ async def upload_document(
             storage_path=str(storage_path),
             file_size=len(file_bytes),
             file_hash=hashlib.sha256(file_bytes).hexdigest(),
-            status=DocumentStatus.PENDING,
+            status=DocumentStatus.PENDING_REVIEW,
         )
         session.add(doc)
         await session.commit()
@@ -241,7 +253,7 @@ async def list_documents(
     """List documents: citizens see their own rows, admins see all rows."""
 
     query = select(Document).order_by(Document.created_at.desc())
-    if current_user.role != UserRole.ADMIN:
+    if not _is_staff(current_user):
         query = query.where(Document.uploader_id == current_user.id)
     result = await session.execute(query.limit(limit).offset(offset))
     return list(result.scalars().all())
@@ -276,32 +288,138 @@ async def download_document(
     )
 
 
+async def _load_reviewable_doc(
+    session: AsyncSession,
+    request: Request,
+    reviewer: User,
+    doc_id: uuid_lib.UUID,
+    action: str,
+) -> Document:
+    """Fetch a document that is in a reviewable state, else audit + raise."""
+
+    result = await session.execute(select(Document).where(Document.id == doc_id))
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        await record_audit(
+            session, action=action, outcome="not_found", request=request,
+            actor_id=reviewer.id, target_type="document", target_id=doc_id,
+        )
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Document not found")
+    if doc.status not in (DocumentStatus.PENDING_REVIEW, DocumentStatus.PENDING):
+        await record_audit(
+            session, action=action, outcome="invalid_state", request=request,
+            actor_id=reviewer.id, target_type="document", target_id=doc_id,
+            extra={"status": doc.status.value},
+        )
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            f"Only a document awaiting review can be {action}d "
+            f"(status={doc.status.value})",
+        )
+    return doc
+
+
+@router.post("/{doc_id}/approve", response_model=DocumentResponse)
+async def approve_document(
+    doc_id: uuid_lib.UUID,
+    request: Request,
+    body: ReviewRequest | None = None,
+    current_reviewer: User = Depends(require_reviewer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Approve a document for signing. Reviewer role only."""
+
+    doc = await _load_reviewable_doc(session, request, current_reviewer, doc_id, "approve")
+    doc.status = DocumentStatus.APPROVED
+    doc.reviewed_by = current_reviewer.id
+    doc.reviewed_at = datetime.now(timezone.utc)
+    doc.review_note = body.note if body else None
+    await session.commit()
+    await session.refresh(doc)
+
+    await record_audit(
+        session, action="approve", outcome="success", request=request,
+        actor_id=current_reviewer.id, target_type="document", target_id=doc.id,
+        extra={"actor_role": current_reviewer.role.value},
+    )
+    return doc
+
+
+@router.post("/{doc_id}/reject", response_model=DocumentResponse)
+async def reject_document(
+    doc_id: uuid_lib.UUID,
+    request: Request,
+    body: ReviewRequest,
+    current_reviewer: User = Depends(require_reviewer),
+    session: AsyncSession = Depends(get_session),
+):
+    """Reject a document with a mandatory review note. Reviewer role only."""
+
+    if not body.note or not body.note.strip():
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            "A review note is required when rejecting a document",
+        )
+
+    doc = await _load_reviewable_doc(session, request, current_reviewer, doc_id, "reject")
+    doc.status = DocumentStatus.REJECTED
+    doc.reviewed_by = current_reviewer.id
+    doc.reviewed_at = datetime.now(timezone.utc)
+    doc.review_note = body.note
+    await session.commit()
+    await session.refresh(doc)
+
+    await record_audit(
+        session, action="reject", outcome="success", request=request,
+        actor_id=current_reviewer.id, target_type="document", target_id=doc.id,
+        extra={"actor_role": current_reviewer.role.value},
+    )
+    return doc
+
+
 @router.post("/{doc_id}/sign", response_model=DocumentResponse)
 async def sign_document_endpoint(
     doc_id: uuid_lib.UUID,
     request: Request,
-    current_admin: User = Depends(require_admin),
+    current_signer: User = Depends(require_signer),
     session: AsyncSession = Depends(get_session),
 ):
-    """Sign an unchanged uploaded document with ML-DSA-44. Admin only."""
+    """Sign an approved, unchanged document with ML-DSA-44. Signer role only.
+
+    Enforces the review workflow (document must be APPROVED) and separation of
+    duty (the reviewer who approved a document may not also sign it).
+    """
 
     result = await session.execute(select(Document).where(Document.id == doc_id))
     doc = result.scalar_one_or_none()
     if doc is None:
         await _audit_sign_failure(
-            session, request, current_admin, doc_id, "not_found",
+            session, request, current_signer, doc_id, "not_found",
             "Document not found", status.HTTP_404_NOT_FOUND,
         )
     if doc.status == DocumentStatus.SIGNED:
         await _audit_sign_failure(
-            session, request, current_admin, doc_id, "already_signed",
+            session, request, current_signer, doc_id, "already_signed",
             "Document already signed", status.HTTP_409_CONFLICT,
+        )
+    if doc.status != DocumentStatus.APPROVED:
+        await _audit_sign_failure(
+            session, request, current_signer, doc_id, "document_not_approved",
+            f"Document must be approved by a reviewer before signing "
+            f"(status={doc.status.value})",
+            status.HTTP_409_CONFLICT,
+        )
+    if doc.reviewed_by is not None and doc.reviewed_by == current_signer.id:
+        await _audit_sign_failure(
+            session, request, current_signer, doc_id, "separation_of_duty",
+            "The reviewer who approved a document may not also sign it",
+            status.HTTP_403_FORBIDDEN,
         )
 
     file_path = Path(doc.storage_path)
     if not file_path.exists():
         await _audit_sign_failure(
-            session, request, current_admin, doc_id, "file_missing",
+            session, request, current_signer, doc_id, "file_missing",
             "File missing on disk", status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
@@ -309,13 +427,13 @@ async def sign_document_endpoint(
         pdf_bytes = file_path.read_bytes()
     except OSError:
         await _audit_sign_failure(
-            session, request, current_admin, doc_id, "file_read_error",
+            session, request, current_signer, doc_id, "file_read_error",
             "Unable to read document from disk", status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
     current_hash = hashlib.sha256(pdf_bytes).hexdigest()
     if current_hash != doc.file_hash:
         await _audit_sign_failure(
-            session, request, current_admin, doc_id, "hash_mismatch_before_sign",
+            session, request, current_signer, doc_id, "hash_mismatch_before_sign",
             "Document hash changed after upload; refusing to sign",
             status.HTTP_409_CONFLICT,
         )
@@ -324,7 +442,7 @@ async def sign_document_endpoint(
         signature, public_key = await mldsa_sign(pdf_bytes)
         doc.mldsa_signature = signature
         doc.signing_public_key = public_key
-        doc.signed_by = current_admin.id
+        doc.signed_by = current_signer.id
         doc.signed_at = datetime.now(timezone.utc)
         doc.status = DocumentStatus.SIGNED
         doc.public_key_ref = hashlib.sha256(public_key).hexdigest()[:16]
@@ -336,7 +454,7 @@ async def sign_document_endpoint(
     except Exception:
         await session.rollback()
         await _audit_sign_failure(
-            session, request, current_admin, doc_id, "crypto_or_database_error",
+            session, request, current_signer, doc_id, "crypto_or_database_error",
             "Unable to sign document", status.HTTP_500_INTERNAL_SERVER_ERROR,
         )
 
@@ -345,10 +463,14 @@ async def sign_document_endpoint(
         action="sign",
         outcome="success",
         request=request,
-        actor_id=current_admin.id,
+        actor_id=current_signer.id,
         target_type="document",
         target_id=doc.id,
-        extra={"file_hash": doc.file_hash, "public_key_ref": doc.public_key_ref},
+        extra={
+            "file_hash": doc.file_hash,
+            "public_key_ref": doc.public_key_ref,
+            "actor_role": current_signer.role.value,
+        },
     )
     return doc
 

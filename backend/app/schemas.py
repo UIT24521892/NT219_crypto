@@ -51,6 +51,11 @@ class UserResponse(BaseModel):
 
 # ---------- Documents ----------
 
+class ReviewRequest(BaseModel):
+    """POST /documents/{id}/approve and /reject body."""
+    note: Optional[str] = Field(default=None, max_length=2000)
+
+
 class DocumentResponse(BaseModel):
     """Document metadata returned from /documents endpoints."""
     model_config = ConfigDict(from_attributes=True)
@@ -61,9 +66,13 @@ class DocumentResponse(BaseModel):
     file_size: int
     file_hash: str
     status: DocumentStatus
+    reviewed_by: Optional[uuid.UUID] = None
+    reviewed_at: Optional[datetime] = None
+    review_note: Optional[str] = None
     signed_by: Optional[uuid.UUID] = None
     signed_at: Optional[datetime] = None
     public_key_ref: Optional[str] = None
+    qr_public_key_ref: Optional[str] = None
     qr_issued_at: Optional[datetime] = None
     qr_expires_at: Optional[datetime] = None
     created_at: datetime
