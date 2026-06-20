@@ -1,22 +1,22 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
-import { useAuth } from "../contexts/AuthContext";
-import {
-  listDocuments,
-  uploadDocument,
-  signDocument,
-} from "../services/documents";
+import { listDocuments, uploadDocument } from "../services/documents";
+
+const STATUS_META = {
+  pending: { label: "Chờ", key: "badgePending" },
+  pending_review: { label: "Chờ duyệt", key: "badgePending" },
+  approved: { label: "Đã duyệt", key: "badgeApproved" },
+  signed: { label: "Đã ký", key: "badgeSigned" },
+  rejected: { label: "Bị từ chối", key: "badgeRejected" },
+};
 
 export default function DocumentsListPage() {
-  const { isAdmin } = useAuth();
-
   const [documents, setDocuments] = useState([]);
   const [file, setFile] = useState(null);
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(false);
-  const [signingId, setSigningId] = useState(null);
 
   async function loadDocuments() {
     setLoading(true);
@@ -82,36 +82,6 @@ export default function DocumentsListPage() {
     }
   }
 
-  async function handleSign(doc) {
-    const docId = doc.id || doc.doc_id;
-
-    if (!docId) {
-      setMessageType("error");
-      setMessage("Không tìm thấy document id để ký.");
-      return;
-    }
-
-    setSigningId(docId);
-    setMessageType("info");
-    setMessage("Đang ký tài liệu bằng FALCON-512...");
-
-    try {
-      await signDocument(docId);
-      setMessageType("success");
-      setMessage("Ký tài liệu thành công. Trạng thái đã chuyển sang signed.");
-      await loadDocuments();
-    } catch (err) {
-      setMessageType("error");
-      setMessage(
-        err.response?.data?.detail ||
-          err.response?.data?.message ||
-          `Ký thất bại. Status: ${err.response?.status || "Network Error"}`
-      );
-    } finally {
-      setSigningId(null);
-    }
-  }
-
   function shortHash(hash) {
     if (!hash) return "-";
     if (hash.length <= 24) return hash;
@@ -124,7 +94,9 @@ export default function DocumentsListPage() {
   }
 
   const totalSigned = documents.filter((doc) => doc.status === "signed").length;
-  const totalPending = documents.filter((doc) => doc.status === "pending").length;
+  const totalPending = documents.filter(
+    (doc) => doc.status === "pending_review" || doc.status === "approved" || doc.status === "pending"
+  ).length;
 
   return (
     <div>
@@ -133,7 +105,7 @@ export default function DocumentsListPage() {
           <p style={styles.kicker}>Quản lý tài liệu</p>
           <h1 style={styles.title}>Danh sách tài liệu</h1>
           <p style={styles.subtitle}>
-            Upload PDF, theo dõi SHA-256 hash và trạng thái ký số FALCON-512.
+            Upload PDF, theo dõi SHA-256 hash và trạng thái duyệt/ký số ML-DSA-44.
           </p>
         </div>
       </div>
@@ -206,7 +178,10 @@ export default function DocumentsListPage() {
               const hash = doc.file_hash || doc.fileHash || "-";
               const status = doc.status || "-";
               const createdAt = doc.created_at || doc.createdAt || "-";
-              const isSigned = status === "signed";
+              const statusMeta = STATUS_META[status] || {
+                label: status,
+                key: "badgePending",
+              };
 
               return (
                 <tr key={docId}>
@@ -223,13 +198,8 @@ export default function DocumentsListPage() {
                   </td>
 
                   <td style={styles.td}>
-                    <span
-                      style={{
-                        ...styles.badge,
-                        ...(isSigned ? styles.badgeSigned : styles.badgePending),
-                      }}
-                    >
-                      {isSigned ? "Đã ký" : "Chờ ký"}
+                    <span style={{ ...styles.badge, ...styles[statusMeta.key] }}>
+                      {statusMeta.label}
                     </span>
                   </td>
 
@@ -242,17 +212,6 @@ export default function DocumentsListPage() {
                       <Link to={`/documents/${docId}`} style={styles.linkButton}>
                         Xem
                       </Link>
-
-                      {isAdmin && !isSigned && (
-                        <button
-                          type="button"
-                          onClick={() => handleSign(doc)}
-                          disabled={signingId === docId}
-                          style={styles.signButton}
-                        >
-                          {signingId === docId ? "Đang ký..." : "Ký FALCON"}
-                        </button>
-                      )}
                     </div>
                   </td>
                 </tr>
@@ -449,6 +408,14 @@ const styles = {
   badgePending: {
     background: "#fef3c7",
     color: "#92400e",
+  },
+  badgeApproved: {
+    background: "#dbeafe",
+    color: "#1e40af",
+  },
+  badgeRejected: {
+    background: "#fee2e2",
+    color: "#991b1b",
   },
   actions: {
     display: "flex",

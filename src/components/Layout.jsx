@@ -1,8 +1,15 @@
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
+const ROLE_LABEL = {
+  admin: "Quản trị viên",
+  reviewer: "Người duyệt",
+  signer: "Người ký",
+  citizen: "Công dân",
+};
+
 export default function Layout() {
-  const { user, logout, isAdmin } = useAuth();
+  const { user, logout, role, isReviewer, isSigner } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -29,7 +36,7 @@ export default function Layout() {
         <div style={styles.userCard}>
           <p style={styles.userLabel}>Tài khoản</p>
           <p style={styles.userEmail}>{user?.email || "user@example.com"}</p>
-          <span style={styles.roleBadge}>{isAdmin ? "Quản trị viên" : "Công dân"}</span>
+          <span style={styles.roleBadge}>{ROLE_LABEL[role] || "Công dân"}</span>
         </div>
 
         <nav style={styles.nav}>
@@ -44,16 +51,29 @@ export default function Layout() {
             <span>Quản lý tài liệu</span>
           </Link>
 
-          {isAdmin && (
+          {isReviewer && (
             <Link
               style={{
                 ...styles.navItem,
-                ...(isActive("/admin") ? styles.navItemActive : {}),
+                ...(isActive("/review") ? styles.navItemActive : {}),
               }}
-              to="/admin"
+              to="/review"
             >
               <span>🛡️</span>
-              <span>Quản trị ký số</span>
+              <span>Hàng chờ duyệt</span>
+            </Link>
+          )}
+
+          {isSigner && (
+            <Link
+              style={{
+                ...styles.navItem,
+                ...(isActive("/sign") ? styles.navItemActive : {}),
+              }}
+              to="/sign"
+            >
+              <span>✍️</span>
+              <span>Hàng chờ ký</span>
             </Link>
           )}
 

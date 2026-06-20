@@ -48,6 +48,8 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
+  const role = user?.role || null;
+
   return (
     <AuthContext.Provider
       value={{
@@ -55,7 +57,12 @@ export function AuthProvider({ children }) {
         loading,
         login,
         logout,
-        isAdmin: user?.role === "admin",
+        role,
+        isAdmin: role === "admin",
+        // Admin retains every staff capability (super-role).
+        isReviewer: role === "reviewer" || role === "admin",
+        isSigner: role === "signer" || role === "admin",
+        isStaff: ["admin", "reviewer", "signer"].includes(role),
       }}
     >
       {children}

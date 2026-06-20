@@ -5,22 +5,27 @@ import { useAuth } from "../contexts/AuthContext";
 import {
   getDocument,
   downloadDocument,
+  downloadSignedDocument,
   getQrCode,
   getVerificationPackage,
   signDocument,
+  approveDocument,
+  rejectDocument,
 } from "../services/documents";
 
 export default function DocumentDetailPage() {
   const { id } = useParams();
-  const { isAdmin } = useAuth();
+  const { isReviewer, isSigner } = useAuth();
 
   const [doc, setDoc] = useState(null);
   const [qrUrl, setQrUrl] = useState("");
+  const [reviewNote, setReviewNote] = useState("");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("info");
   const [loading, setLoading] = useState(false);
   const [qrLoading, setQrLoading] = useState(false);
   const [signing, setSigning] = useState(false);
+  const [reviewing, setReviewing] = useState(false);
 
   const verifyUrl = `${window.location.origin}/verify?d=${id}`;
 
@@ -79,7 +84,7 @@ export default function DocumentDetailPage() {
   async function handleSign() {
     setSigning(true);
     setMessageType("info");
-    setMessage("Đang ký tài liệu bằng FALCON-512...");
+    setMessage("Đang ký tài liệu bằng ML-DSA-44 + QR Ed25519...");
 
     try {
       await signDocument(id);
@@ -88,13 +93,81 @@ export default function DocumentDetailPage() {
       await loadDocument();
     } catch (err) {
       setMessageType("error");
-      setMessage(
+      const detail =
         err.response?.data?.detail ||
-          err.response?.data?.message ||
-          `Ký thất bại. Status: ${err.response?.status || "Network Error"}`
+        err.response?.data?.message ||
+        `Ký thất bại. Status: ${err.response?.status || "Network Error"}`;
+      setMessage(
+        err.response?.status === 403
+          ? `Bị từ chối: ${detail} (người duyệt không được tự ký).`
+          : detail
       );
     } finally {
       setSigning(false);
+    }
+  }
+
+  async function handleApprove() {
+    setReviewing(true);
+    setMessageType("info");
+    setMessage("Đang phê duyệt...");
+
+    try {
+      await approveDocument(id, reviewNote);
+      setMessageType("success");
+      setMessage("Đã phê duyệt. Tài liệu chuyển sang hàng chờ ký.");
+      setReviewNote("");
+      await loadDocument();
+    } catch (err) {
+      setMessageType("error");
+      setMessage(err.response?.data?.detail || "Phê duyệt thất bại.");
+    } finally {
+      setReviewing(false);
+    }
+  }
+
+  async function handleReject() {
+    const note = reviewNote.trim();
+    if (!note) {
+      setMessageType("error");
+      setMessage("Phải nhập lý do từ chối.");
+      return;
+    }
+    setReviewing(true);
+    setMessageType("info");
+    setMessage("Đang từ chối...");
+
+    try {
+      await rejectDocument(id, note);
+      setMessageType("success");
+      setMessage("Đã từ chối tài liệu.");
+      setReviewNote("");
+      await loadDocument();
+    } catch (err) {
+      setMessageType("error");
+      setMessage(err.response?.data?.detail || "Từ chối thất bại.");
+    } finally {
+      setReviewing(false);
+    }
+  }
+
+  async function handleDownloadSigned() {
+    try {
+      const blob = await downloadSignedDocument(id);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${(doc?.filename || "document").replace(/\.pdf$/i, "")}_signed.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setMessageType("error");
+      setMessage(
+        err.response?.data?.detail ||
+          "Không tải được PDF đã ký (QR + chữ ký nhúng)."
+      );
     }
   }
 
@@ -166,6 +239,17 @@ export default function DocumentDetailPage() {
 
   const status = doc.status || "-";
   const isSigned = status === "signed";
+  const isPendingReview = status === "pending_review";
+  const isApproved = status === "approved";
+  const isRejected = status === "rejected";
+
+  const STATUS_META = {
+    pending_review: { label: "Chờ duyệt", style: styles.badgePending },
+    approved: { label: "Đã duyệt", style: styles.badgeApproved },
+    signed: { label: "Đã ký", style: styles.badgeSigned },
+    rejected: { label: "Bị từ chối", style: styles.badgeRejected },
+  };
+  const statusMeta = STATUS_META[status] || { label: status, style: styles.badgePending };
 
   return (
     <div>
@@ -198,13 +282,8 @@ export default function DocumentDetailPage() {
       <section style={styles.card}>
         <div style={styles.cardHeader}>
           <h2 style={styles.sectionTitle}>Thông tin định danh</h2>
-          <span
-            style={{
-              ...styles.badge,
-              ...(isSigned ? styles.badgeSigned : styles.badgePending),
-            }}
-          >
-            {isSigned ? "Đã ký" : "Chờ ký"}
+          <span style={{ ...styles.badge, ...statusMeta.style }}>
+            {statusMeta.label}
           </span>
         </div>
 
@@ -213,12 +292,20 @@ export default function DocumentDetailPage() {
           <Info label="Tên file" value={doc.filename} />
           <Info label="Dung lượng" value={doc.file_size ? `${doc.file_size} bytes` : "-"} />
           <Info label="SHA-256" value={shortHash(doc.file_hash)} breakText />
-          <Info label="Thuật toán" value="FALCON-512" />
+          <Info label="Thuật toán" value="ML-DSA-44 (PQC) + Ed25519 (QR)" />
           <Info label="Ngày upload" value={formatDate(doc.created_at)} />
           <Info label="Ngày ký" value={formatDate(doc.signed_at)} />
-          <Info label="Public key ref" value={doc.public_key_ref || "-"} />
+          <Info label="ML-DSA key ref" value={doc.public_key_ref || "-"} breakText />
+          <Info label="QR key ref (Ed25519)" value={doc.qr_public_key_ref || "-"} breakText />
           <Info label="Người ký" value={doc.signer_email || doc.signed_by || "-"} />
         </div>
+
+        {(isRejected || doc.review_note) && (
+          <p style={isRejected ? styles.rejectNote : styles.note}>
+            {isRejected ? "Lý do từ chối: " : "Ghi chú duyệt: "}
+            {doc.review_note || "(không có)"}
+          </p>
+        )}
       </section>
 
       <section style={styles.card}>
@@ -226,17 +313,17 @@ export default function DocumentDetailPage() {
 
         <div style={styles.actions}>
           <button type="button" onClick={handleDownload} style={styles.btnBlue}>
-            Tải PDF
+            Tải PDF gốc
           </button>
 
-          {isAdmin && !isSigned && (
+          {isSigner && isApproved && (
             <button
               type="button"
               onClick={handleSign}
               disabled={signing}
               style={styles.btnGreen}
             >
-              {signing ? "Đang ký..." : "Ký FALCON"}
+              {signing ? "Đang ký..." : "Ký ML-DSA-44"}
             </button>
           )}
 
@@ -244,9 +331,17 @@ export default function DocumentDetailPage() {
             <>
               <button
                 type="button"
+                onClick={handleDownloadSigned}
+                style={styles.btnGreen}
+              >
+                Tải PDF đã ký (QR + chữ ký)
+              </button>
+
+              <button
+                type="button"
                 onClick={handleShowQr}
                 disabled={qrLoading}
-                style={styles.btnGreen}
+                style={styles.btnOutline}
               >
                 {qrLoading ? "Đang tạo QR..." : "Xem QR"}
               </button>
@@ -266,10 +361,41 @@ export default function DocumentDetailPage() {
           )}
         </div>
 
-        {!isSigned && (
-          <p style={styles.note}>
-            Tài liệu đang chờ ký. Admin cần ký FALCON trước khi tạo QR.
-          </p>
+        {isReviewer && isPendingReview && (
+          <div style={styles.reviewBox}>
+            <p style={styles.reviewTitle}>Duyệt hồ sơ</p>
+            <textarea
+              value={reviewNote}
+              onChange={(e) => setReviewNote(e.target.value)}
+              placeholder="Ghi chú duyệt / lý do từ chối..."
+              style={styles.textarea}
+            />
+            <div style={styles.actions}>
+              <button
+                type="button"
+                onClick={handleApprove}
+                disabled={reviewing}
+                style={styles.btnGreen}
+              >
+                {reviewing ? "..." : "Phê duyệt"}
+              </button>
+              <button
+                type="button"
+                onClick={handleReject}
+                disabled={reviewing}
+                style={styles.btnRed}
+              >
+                Từ chối
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isPendingReview && !isReviewer && (
+          <p style={styles.note}>Tài liệu đang chờ người duyệt phê duyệt.</p>
+        )}
+        {isApproved && !isSigner && (
+          <p style={styles.note}>Đã duyệt — đang chờ người ký áp chữ ký ML-DSA-44.</p>
         )}
       </section>
 
@@ -395,6 +521,55 @@ const styles = {
   badgePending: {
     background: "#fef3c7",
     color: "#92400e",
+  },
+  badgeApproved: {
+    background: "#dbeafe",
+    color: "#1e40af",
+  },
+  badgeRejected: {
+    background: "#fee2e2",
+    color: "#991b1b",
+  },
+  reviewBox: {
+    marginTop: 16,
+    background: "#f8fafc",
+    border: "1px solid #e2e8f0",
+    borderRadius: 12,
+    padding: 14,
+  },
+  reviewTitle: {
+    margin: "0 0 10px",
+    fontWeight: 900,
+    color: "#111827",
+  },
+  textarea: {
+    width: "100%",
+    minHeight: 64,
+    padding: 10,
+    borderRadius: 10,
+    border: "1px solid #cbd5e1",
+    fontFamily: "inherit",
+    fontSize: 14,
+    boxSizing: "border-box",
+    marginBottom: 12,
+  },
+  btnRed: {
+    background: "#b91c1c",
+    color: "white",
+    border: 0,
+    borderRadius: 10,
+    padding: "10px 14px",
+    cursor: "pointer",
+    fontWeight: 800,
+  },
+  rejectNote: {
+    marginTop: 14,
+    background: "#fef2f2",
+    border: "1px solid #fecaca",
+    color: "#991b1b",
+    padding: "10px 12px",
+    borderRadius: 10,
+    fontWeight: 650,
   },
   actions: {
     display: "flex",

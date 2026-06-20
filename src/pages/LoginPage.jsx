@@ -58,14 +58,14 @@ export default function LoginPage() {
         <div style={styles.logoBox}>✓</div>
         <h1 style={styles.heroTitle}>Cổng xác thực tài liệu số</h1>
         <p style={styles.heroText}>
-          Hệ thống hỗ trợ ký số tài liệu PDF bằng FALCON-512, tạo QR và xác thực
+          Hệ thống hỗ trợ ký số tài liệu PDF bằng ML-DSA-44, tạo QR và xác thực
           công khai bằng công nghệ mật mã hậu lượng tử.
         </p>
 
         <div style={styles.featureList}>
           <div style={styles.feature}>SHA-256 File Hashing</div>
-          <div style={styles.feature}>FALCON-512 Digital Signature</div>
-          <div style={styles.feature}>QR Public Verification</div>
+          <div style={styles.feature}>ML-DSA-44 Post-Quantum Signature</div>
+          <div style={styles.feature}>Ed25519 Offline QR Verification</div>
         </div>
       </div>
 

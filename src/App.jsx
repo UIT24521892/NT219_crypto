@@ -10,7 +10,8 @@ import VerifyPage from "./pages/VerifyPage";
 import RegisterPage from "./pages/RegisterPage";
 import DocumentsListPage from "./pages/DocumentsListPage";
 import DocumentDetailPage from "./pages/DocumentDetailPage";
-import AdminPage from "./pages/AdminPage";
+import ReviewerPage from "./pages/ReviewerPage";
+import SignerPage from "./pages/SignerPage";
 
 function RootRedirect() {
   const { user, loading } = useAuth();
@@ -72,13 +73,25 @@ export default function App() {
             </Route>
           </Route>
 
-          {/* Admin routes */}
-          <Route element={<ProtectedRoute requireAdmin />}>
+          {/* Reviewer queue — approve/reject pending documents */}
+          <Route element={<ProtectedRoute allow={["reviewer"]} />}>
             <Route element={<Layout />}>
 
               <Route
-                path="/admin"
-                element={<AdminPage />}
+                path="/review"
+                element={<ReviewerPage />}
+              />
+
+            </Route>
+          </Route>
+
+          {/* Signer queue — apply ML-DSA-44 signature to approved documents */}
+          <Route element={<ProtectedRoute allow={["signer"]} />}>
+            <Route element={<Layout />}>
+
+              <Route
+                path="/sign"
+                element={<SignerPage />}
               />
 
             </Route>

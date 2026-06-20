@@ -1,7 +1,7 @@
 import { Navigate, Outlet, useLocation } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 
-export default function ProtectedRoute({ requireAdmin = false }) {
+export default function ProtectedRoute({ allow = null }) {
   const { user, loading } = useAuth();
   const location = useLocation();
 
@@ -13,7 +13,8 @@ export default function ProtectedRoute({ requireAdmin = false }) {
     return <Navigate to="/login" replace state={{ from: location }} />;
   }
 
-  if (requireAdmin && user.role !== "admin") {
+  // `allow` is a list of roles permitted on this route; admin always passes.
+  if (allow && user.role !== "admin" && !allow.includes(user.role)) {
     return <Navigate to="/documents" replace />;
   }
 
