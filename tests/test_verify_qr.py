@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from backend.app.crypto.falcon_service import (
+from backend.app.crypto.mldsa_service import (
     available_signature_algorithms,
     generate_keypair,
     sign_document,
@@ -48,7 +48,7 @@ def test_verify_qr_accepts_valid_payload():
         "valid": True,
         "reason": "valid",
         "doc_id": "doc-verify-qr",
-        "algorithm": "FALCON-512",
+        "algorithm": "ML-DSA-44",
     }
 
 

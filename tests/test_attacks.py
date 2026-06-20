@@ -1,6 +1,6 @@
 import pytest
 
-from backend.app.crypto.falcon_service import available_signature_algorithms
+from backend.app.crypto.mldsa_service import available_signature_algorithms
 from scripts.attack_forgery import run_demo as run_forgery_demo
 from scripts.attack_replay import run_demo as run_replay_demo
 

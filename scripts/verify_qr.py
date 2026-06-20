@@ -16,7 +16,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 with contextlib.redirect_stdout(sys.stderr):
-    from backend.app.crypto.falcon_service import verify_document  # noqa: E402
+    from backend.app.crypto.mldsa_service import verify_document  # noqa: E402
     from backend.app.crypto.qr_builder import (  # noqa: E402
         QR_ALGORITHM,
         b64url_decode,

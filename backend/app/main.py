@@ -33,7 +33,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Citizen Services Portal",
-    description="Public administrative services with FALCON-512 post-quantum signatures",
+    description="Public administrative services with ML-DSA-44 post-quantum signatures",
     version="0.1.0",
     lifespan=lifespan,
 )

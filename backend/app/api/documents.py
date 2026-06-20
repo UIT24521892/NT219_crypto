@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.audit_utils import record_audit
 from app.auth_middleware import get_current_user, require_admin
 from app.config import settings
-from app.crypto.falcon_service import sign_document_async as falcon_sign
+from app.crypto.mldsa_service import sign_document_async as mldsa_sign
 from app.crypto.qr_builder import (
     QR_ALGORITHM,
     b64url_encode,
@@ -283,7 +283,7 @@ async def sign_document_endpoint(
     current_admin: User = Depends(require_admin),
     session: AsyncSession = Depends(get_session),
 ):
-    """Sign an unchanged uploaded document with FALCON-512. Admin only."""
+    """Sign an unchanged uploaded document with ML-DSA-44. Admin only."""
 
     result = await session.execute(select(Document).where(Document.id == doc_id))
     doc = result.scalar_one_or_none()
@@ -321,7 +321,7 @@ async def sign_document_endpoint(
         )
 
     try:
-        signature, public_key = await falcon_sign(pdf_bytes)
+        signature, public_key = await mldsa_sign(pdf_bytes)
         doc.falcon_signature = signature
         doc.signing_public_key = public_key
         doc.signed_by = current_admin.id

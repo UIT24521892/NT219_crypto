@@ -15,7 +15,8 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from dotenv import load_dotenv
 
-from .falcon_primitives import ALGORITHM, generate_keypair, resolve_algorithm
+from . import ed25519_qr_service as ed25519
+from .mldsa_service import ALGORITHM, generate_keypair, resolve_algorithm
 
 
 KEY_PASSPHRASE_ENV: Final[str] = "KEY_PASSPHRASE"
@@ -42,7 +43,7 @@ def _b64_decode(value: Any, field_name: str) -> bytes:
 
 
 def _private_key_aad(version: int, algorithm: str) -> bytes:
-    return f"admin-falcon-private-key:v{version}:{algorithm}".encode("utf-8")
+    return f"admin-private-key:v{version}:{algorithm}".encode("utf-8")
 
 
 def _derive_aes_key(
@@ -99,9 +100,9 @@ def derive_aes_key(passphrase: bytes, salt: bytes) -> bytes:
 def save_encrypted_private_key(
     private_key: bytes,
     path: str | Path,
-    algorithm: str = "FALCON-512",
+    algorithm: str = "ML-DSA-44",
 ) -> None:
-    """Encrypt and save an admin FALCON private key using AES-256-GCM."""
+    """Encrypt and save an admin private key using AES-256-GCM."""
 
     if not isinstance(private_key, bytes):
         raise TypeError("private_key must be bytes")
@@ -210,12 +211,13 @@ def load_public_key(path: str | Path) -> bytes:
         raise RuntimeError(f"Public key file not found: {public_path}") from exc
 
 
-def ensure_admin_keypair(
+def ensure_mldsa_keypair(
     private_path: str | Path,
     public_path: str | Path,
 ) -> tuple[bytes, bytes]:
     """
-    Load the admin keypair if both files exist, otherwise generate and save one.
+    Load the server ML-DSA keypair if both files exist, otherwise generate and
+    save one (private key AES-256-GCM encrypted).
 
     Returns:
         (public_key, private_key)
@@ -231,11 +233,46 @@ def ensure_admin_keypair(
 
     if private_exists != public_exists:
         raise RuntimeError(
-            "Admin keypair is incomplete. Refusing to overwrite only one key file."
+            "ML-DSA keypair is incomplete. Refusing to overwrite only one key file."
         )
 
     resolved_algorithm = resolve_algorithm(ALGORITHM)
     public_key, private_key = generate_keypair(resolved_algorithm)
     save_encrypted_private_key(private_key, private_key_path, resolved_algorithm)
+    save_public_key(public_key, public_key_path)
+    return public_key, private_key
+
+
+# Backward-compatible alias: the single-admin signing key is now an ML-DSA keypair.
+ensure_admin_keypair = ensure_mldsa_keypair
+
+
+def ensure_ed25519_keypair(
+    private_path: str | Path,
+    public_path: str | Path,
+) -> tuple[bytes, bytes]:
+    """
+    Load the server Ed25519 QR keypair if both files exist, otherwise generate and
+    save one (private key AES-256-GCM encrypted, same scheme as the ML-DSA key).
+
+    Returns:
+        (public_key, private_key)  — both raw 32-byte values.
+    """
+
+    private_key_path = Path(private_path)
+    public_key_path = Path(public_path)
+    private_exists = private_key_path.exists()
+    public_exists = public_key_path.exists()
+
+    if private_exists and public_exists:
+        return load_public_key(public_key_path), load_encrypted_private_key(private_key_path)
+
+    if private_exists != public_exists:
+        raise RuntimeError(
+            "Ed25519 keypair is incomplete. Refusing to overwrite only one key file."
+        )
+
+    public_key, private_key = ed25519.generate_keypair()
+    save_encrypted_private_key(private_key, private_key_path, ed25519.ALGORITHM)
     save_public_key(public_key, public_key_path)
     return public_key, private_key
