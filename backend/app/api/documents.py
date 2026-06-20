@@ -29,15 +29,26 @@ from app.auth_middleware import (
     require_reviewer,
     require_signer,
 )
-from app.api.public_keys import ALG_MLDSA, register_public_key
+from app.api.public_keys import (
+    ALG_ED25519,
+    ALG_MLDSA,
+    make_key_id,
+    register_public_key,
+)
 from app.config import settings
+from app.crypto import ed25519_qr_service as ed25519
 from app.crypto.mldsa_service import sign_document_async as mldsa_sign
+from app.crypto.mldsa_service import verify_document as mldsa_verify_document
 from app.crypto.qr_builder import (
     QR_ALGORITHM,
     b64url_encode,
     build_offline_payload,
-    build_online_payload,
     render_png,
+)
+from app.crypto.qr_hybrid import (
+    QR_SIG_ALGORITHM,
+    build_qr_canonical,
+    build_qr_payload,
 )
 from app.database import get_session
 from app.models import Document, DocumentStatus, User, UserRole
@@ -440,18 +451,63 @@ async def sign_document_endpoint(
         )
 
     try:
+        # 1) Primary post-quantum signature: ML-DSA-44 over SHA-256(PDF).
         signature, public_key = await mldsa_sign(pdf_bytes)
+
+        # 2) Small offline QR signature: Ed25519 over the QR canonical string.
+        issued_at, expires_at = _new_qr_window()
+        signed_at = datetime.now(timezone.utc)
+        qr_public_key, _ = await ed25519.load_or_create_keys()
+        qr_public_key_ref = make_key_id(ALG_ED25519, qr_public_key)
+        canonical = build_qr_canonical(
+            doc_id=str(doc.id),
+            file_hash=doc.file_hash,
+            signer_email=current_signer.email,
+            signed_at=signed_at,
+            valid_from=issued_at,
+            valid_until=expires_at,
+            qr_public_key_ref=qr_public_key_ref,
+        )
+        qr_signature, _ = await ed25519.sign_qr_async(canonical)
+
+        # 3) Self-check: verify both signatures before persisting.
+        if not mldsa_verify_document(pdf_bytes, signature, public_key,
+                                     expected_hash_hex=doc.file_hash):
+            raise RuntimeError("ML-DSA self-check failed")
+        if not ed25519.verify_qr(canonical, qr_signature, qr_public_key):
+            raise RuntimeError("Ed25519 QR self-check failed")
+
+        qr_payload_str = build_qr_payload(
+            qr_signature=qr_signature,
+            doc_id=str(doc.id),
+            file_hash=doc.file_hash,
+            signer_email=current_signer.email,
+            signed_at=signed_at,
+            valid_from=issued_at,
+            valid_until=expires_at,
+            qr_public_key_ref=qr_public_key_ref,
+        )
+
         doc.mldsa_signature = signature
         doc.signing_public_key = public_key
+        doc.qr_signature = qr_signature
         doc.signed_by = current_signer.id
-        doc.signed_at = datetime.now(timezone.utc)
+        doc.signed_at = signed_at
         doc.status = DocumentStatus.SIGNED
         doc.public_key_ref = await register_public_key(
             session, algorithm=ALG_MLDSA, public_key=public_key
         )
-        doc.qr_payload = None
-        doc.qr_issued_at = None
-        doc.qr_expires_at = None
+        doc.qr_public_key_ref = await register_public_key(
+            session, algorithm=ALG_ED25519, public_key=qr_public_key
+        )
+        doc.qr_issued_at = issued_at
+        doc.qr_expires_at = expires_at
+        doc.qr_payload = {
+            "v": 2,
+            "format": "hybrid-ed25519",
+            "alg": QR_SIG_ALGORITHM,
+            "payload": qr_payload_str,
+        }
         await session.commit()
         await session.refresh(doc)
     except Exception:
@@ -482,32 +538,26 @@ async def sign_document_endpoint(
 async def generate_qr(
     doc_id: uuid_lib.UUID,
     request: Request,
-    current_user: User = Depends(require_admin),
+    current_user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
 ):
-    """Generate a phone-scannable QR PNG that encodes a public verify URL. Admin only."""
+    """Render the signed document's self-contained offline QR (Ed25519) as a PNG.
+
+    The QR payload is produced at sign time and stored on the document; this
+    endpoint just renders it. Accessible to the document owner or staff.
+    """
 
     doc = await _get_doc_or_404(doc_id, current_user, session)
     _require_signed_material(doc)
 
-    issued_at, expires_at = _new_qr_window()
-    verify_url = f"{str(request.base_url).rstrip('/')}/verify?d={doc.id}"
-    doc.qr_issued_at = issued_at
-    doc.qr_expires_at = expires_at
-    doc.qr_payload = {
-        "v": 1,
-        "id": str(doc.id),
-        "h": doc.file_hash,
-        "ts": _unix_timestamp(issued_at),
-        "ex": _unix_timestamp(expires_at),
-        "alg": QR_ALGORITHM,
-        "url": verify_url,
-    }
-    await session.commit()
-    return Response(
-        content=render_png(build_online_payload(verify_url)),
-        media_type="image/png",
-    )
+    payload = doc.qr_payload or {}
+    payload_str = payload.get("payload") if isinstance(payload, dict) else None
+    if not payload_str:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Signed document has no offline QR payload; re-sign required",
+        )
+    return Response(content=render_png(payload_str), media_type="image/png")
 
 
 @router.get("/{doc_id}/verification-package")

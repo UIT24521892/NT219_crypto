@@ -83,3 +83,65 @@ def public_key_pem(public_key: bytes) -> str:
         encoding=serialization.Encoding.PEM,
         format=serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode("ascii")
+
+
+# --------------------------------------------------------------------------- #
+# Server keypair (deploy path) — cached in RAM, loaded lazily, same encrypted
+# storage scheme as the ML-DSA key.
+# --------------------------------------------------------------------------- #
+import asyncio  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+from . import key_manager as km  # noqa: E402  (bottom import avoids an import cycle)
+
+_KEYS_DIR = Path(__file__).resolve().parent.parent.parent / "keys"
+_PRIVATE_KEY_PATH = _KEYS_DIR / "ed25519_private.enc.json"
+_PUBLIC_KEY_PATH = _KEYS_DIR / "ed25519_public.bin"
+
+_keypair_cache: tuple[bytes, bytes] | None = None  # (public_key, private_key)
+_async_lock: asyncio.Lock | None = None
+
+
+def _get_lock() -> asyncio.Lock:
+    global _async_lock
+    if _async_lock is None:
+        _async_lock = asyncio.Lock()
+    return _async_lock
+
+
+async def load_or_create_keys() -> tuple[bytes, bytes]:
+    """Return the server Ed25519 ``(public_key, private_key)``; load once, cache in RAM."""
+
+    global _keypair_cache
+    if _keypair_cache is not None:
+        return _keypair_cache
+
+    async with _get_lock():
+        if _keypair_cache is not None:
+            return _keypair_cache
+        loop = asyncio.get_running_loop()
+        public_key, private_key = await loop.run_in_executor(
+            None, lambda: km.ensure_ed25519_keypair(_PRIVATE_KEY_PATH, _PUBLIC_KEY_PATH)
+        )
+        _keypair_cache = (public_key, private_key)
+        return _keypair_cache
+
+
+def get_public_key() -> bytes:
+    """Sync getter — only safe after keys are cached (call sign_qr_async first)."""
+
+    if _keypair_cache is None:
+        raise RuntimeError("Ed25519 keys not loaded yet; call sign_qr_async first")
+    public_key, _ = _keypair_cache
+    return public_key
+
+
+async def sign_qr_async(canonical: bytes) -> tuple[bytes, bytes]:
+    """
+    Sign the QR canonical with the server Ed25519 keypair.
+    Returns ``(signature, public_key)``.
+    """
+
+    public_key, private_key = await load_or_create_keys()
+    signature = sign_qr(canonical, private_key)
+    return signature, public_key
