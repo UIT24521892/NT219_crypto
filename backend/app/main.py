@@ -15,6 +15,7 @@ from app.api.documents import router as documents_router
 from app.api.verify import router as verify_router
 from app.api.audit import router as audit_router
 from app.api.public_keys import router as public_keys_router
+from app.api.agencies import router as agencies_router
 from app.config import settings
 from app.database import Base, engine, get_session
 
@@ -60,6 +61,7 @@ app.include_router(documents_router)
 app.include_router(verify_router)
 app.include_router(audit_router)
 app.include_router(public_keys_router)
+app.include_router(agencies_router)
 
 
 @app.get("/ping", tags=["health"])

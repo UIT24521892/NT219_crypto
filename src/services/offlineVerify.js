@@ -5,8 +5,8 @@
  * be verified without contacting the server (like a paper travel permit):
  *
  *     payload   = b64url(signature) | <canonical>
- *     canonical = doc_id | file_hash | signer_email | signed_at | valid_from
- *               | valid_until | qr_public_key_ref
+ *     canonical = doc_id | file_hash | issuer | signer_email | signed_at
+ *               | valid_from | valid_until | qr_public_key_ref
  *
  * The Ed25519 signature covers the UTF-8 bytes of <canonical>. A verifier
  * rebuilds the signed bytes by dropping the first field and re-joining the rest
@@ -25,6 +25,7 @@ const FIELD_SEP = "|";
 const FIELD_NAMES = [
   "doc_id",
   "file_hash",
+  "issuer",
   "signer_email",
   "signed_at",
   "valid_from",

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
+import { useAuth } from "../contexts/AuthContext";
 import { listDocuments, signDocument } from "../services/documents";
 
 export default function SignerPage() {
+  const { agencyId, isAdmin } = useAuth();
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
@@ -59,6 +61,13 @@ export default function SignerPage() {
         Người ký áp chữ ký hậu lượng tử ML-DSA-44 và chữ ký QR Ed25519 lên hồ sơ đã
         được duyệt. Không thể ký hồ sơ do chính mình duyệt.
       </p>
+
+      {agencyId == null && !isAdmin && (
+        <p style={{ ...styles.message, ...styles.msgErr }}>
+          Bạn chưa được gán cơ quan nào nên không thể ký. Liên hệ admin để được gán
+          cơ quan (mục “Quản lý cơ quan”).
+        </p>
+      )}
 
       {message && (
         <p

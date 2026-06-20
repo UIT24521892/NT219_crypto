@@ -297,6 +297,7 @@ export default function DocumentDetailPage() {
           <Info label="Ngày ký" value={formatDate(doc.signed_at)} />
           <Info label="ML-DSA key ref" value={doc.public_key_ref || "-"} breakText />
           <Info label="QR key ref (Ed25519)" value={doc.qr_public_key_ref || "-"} breakText />
+          <Info label="Cơ quan ký" value={doc.signing_agency_name || "-"} />
           <Info label="Người ký" value={doc.signer_email || doc.signed_by || "-"} />
         </div>
 

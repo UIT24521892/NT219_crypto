@@ -31,9 +31,10 @@ def _build(**overrides) -> bytes:
         qr_signature=b"\x22" * 64,
         public_key_ref="ml-dsa-44:abc123def456",
         qr_public_key_ref="ed25519:0123456789abcdef",
-        qr_payload="sig|doc|hash|signer@x.gov|2026|2026|2027|ed25519:0123456789abcdef",
+        qr_payload="sig|doc|hash|Chính phủ|signer@x.gov|2026|2026|2027|ed25519:0123456789abcdef",
         signed_at=datetime(2026, 6, 20, 10, 30, 0, tzinfo=timezone.utc),
         signer_email="signer@portal.gov.vn",
+        issuer="Chính phủ",
     )
     params.update(overrides)
     return build_signed_pdf(**params)
@@ -57,6 +58,7 @@ def test_signatures_roundtrip_through_metadata():
         assert str(pdf.docinfo["/CSP_MLDSA_KeyRef"]) == "ml-dsa-44:abc123def456"
         assert str(pdf.docinfo["/CSP_QR_KeyRef"]) == "ed25519:0123456789abcdef"
         assert str(pdf.docinfo["/CSP_Signed"]) == "2026-06-20T10:30:00+00:00"
+        assert str(pdf.docinfo["/CSP_Issuer"]) == "Chính phủ"
 
 
 def test_original_hash_is_recorded():

@@ -12,6 +12,7 @@ import DocumentsListPage from "./pages/DocumentsListPage";
 import DocumentDetailPage from "./pages/DocumentDetailPage";
 import ReviewerPage from "./pages/ReviewerPage";
 import SignerPage from "./pages/SignerPage";
+import AgenciesPage from "./pages/AgenciesPage";
 
 function RootRedirect() {
   const { user, loading } = useAuth();
@@ -92,6 +93,18 @@ export default function App() {
               <Route
                 path="/sign"
                 element={<SignerPage />}
+              />
+
+            </Route>
+          </Route>
+
+          {/* Admin — manage government agencies + assign signers */}
+          <Route element={<ProtectedRoute allow={["admin"]} />}>
+            <Route element={<Layout />}>
+
+              <Route
+                path="/agencies"
+                element={<AgenciesPage />}
               />
 
             </Route>

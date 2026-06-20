@@ -51,6 +51,7 @@ def run_demo() -> dict[str, object]:
     fields = dict(
         doc_id="demo-qr-tamper-attack",
         file_hash="a" * 64,
+        issuer="Chính phủ",
         signer_email="signer@portal.gov.vn",
         signed_at=signed_at,
         valid_from=signed_at,

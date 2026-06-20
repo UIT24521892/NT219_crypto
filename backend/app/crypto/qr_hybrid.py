@@ -5,8 +5,8 @@ The QR encodes a pipe-delimited, self-contained string — NOT a URL — so it c
 be verified offline at the point of scan (like a paper travel permit):
 
     payload  = b64url(qr_signature) | <canonical>
-    canonical = doc_id | file_hash | signer_email | signed_at | valid_from
-                | valid_until | qr_public_key_ref
+    canonical = doc_id | file_hash | issuer | signer_email | signed_at
+                | valid_from | valid_until | qr_public_key_ref
 
 The Ed25519 signature is computed over the UTF-8 bytes of ``canonical``. Because
 the payload is just ``signature | canonical``, a verifier rebuilds the signed
@@ -56,17 +56,23 @@ def build_qr_canonical(
     *,
     doc_id: str,
     file_hash: str,
+    issuer: str,
     signer_email: str,
     signed_at: datetime,
     valid_from: datetime,
     valid_until: datetime,
     qr_public_key_ref: str,
 ) -> bytes:
-    """Build the deterministic canonical byte-string that Ed25519 signs."""
+    """Build the deterministic canonical byte-string that Ed25519 signs.
+
+    ``issuer`` is the issuing government body (agency name) bound into the
+    signature so the offline verifier can attest which body issued the document.
+    """
 
     fields = [
         _field(doc_id, "doc_id"),
         _field(file_hash, "file_hash"),
+        _field(issuer, "issuer"),
         _field(signer_email, "signer_email"),
         iso_utc(signed_at),
         iso_utc(valid_from),
@@ -81,6 +87,7 @@ def build_qr_payload(
     qr_signature: bytes,
     doc_id: str,
     file_hash: str,
+    issuer: str,
     signer_email: str,
     signed_at: datetime,
     valid_from: datetime,
@@ -94,6 +101,7 @@ def build_qr_payload(
     canonical = build_qr_canonical(
         doc_id=doc_id,
         file_hash=file_hash,
+        issuer=issuer,
         signer_email=signer_email,
         signed_at=signed_at,
         valid_from=valid_from,

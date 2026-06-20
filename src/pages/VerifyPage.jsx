@@ -137,6 +137,7 @@ export default function VerifyPage() {
             {offlineResult.fields && (
               <div style={styles.resultGrid}>
                 <Info label="Document ID" value={offlineResult.fields.doc_id} />
+                <Info label="Cơ quan phát hành" value={offlineResult.fields.issuer} />
                 <Info label="Người ký" value={offlineResult.fields.signer_email} />
                 <Info label="Hiệu lực từ" value={formatDate(offlineResult.fields.valid_from)} />
                 <Info label="Hiệu lực đến" value={formatDate(offlineResult.fields.valid_until)} />
@@ -176,6 +177,7 @@ export default function VerifyPage() {
               <Info label="Document ID" value={result.doc_id} />
               <Info label="Tên file" value={result.filename} />
               <Info label="Trạng thái" value={result.status} />
+              <Info label="Cơ quan phát hành" value={result.issuing_agency || "-"} />
               <Info label="Người ký" value={result.signer_email || "-"} />
               <Info label="Thời gian ký" value={formatDate(result.signed_at)} />
               <Info label="Public key ref" value={result.public_key_ref || "-"} />

@@ -78,6 +78,7 @@ def build_signed_pdf(
     qr_payload: str,
     signed_at: datetime,
     signer_email: Optional[str] = None,
+    issuer: Optional[str] = None,
 ) -> bytes:
     """Return new PDF bytes: original + stamped QR + embedded signature metadata."""
 
@@ -114,6 +115,8 @@ def build_signed_pdf(
         }
         if signer_email:
             meta["/CSP_Signer"] = signer_email
+        if issuer:
+            meta["/CSP_Issuer"] = issuer
         for key, value in meta.items():
             pdf.docinfo[pikepdf.Name(key)] = value
 

@@ -94,6 +94,7 @@ async def verify_document(
         "status": doc.status.value,
         "signed_at": doc.signed_at.isoformat() if doc.signed_at else None,
         "public_key_ref": doc.public_key_ref,
+        "issuing_agency": doc.signing_agency_name,
     }
 
     # Pull signer email

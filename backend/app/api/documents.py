@@ -53,7 +53,7 @@ from app.crypto.qr_hybrid import (
     build_qr_payload,
 )
 from app.database import get_session
-from app.models import Document, DocumentStatus, User, UserRole
+from app.models import Agency, Document, DocumentStatus, User, UserRole
 from app.schemas import DocumentResponse, ReviewRequest
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -461,6 +461,23 @@ async def sign_document_endpoint(
             status.HTTP_403_FORBIDDEN,
         )
 
+    # A signer must act on behalf of a government body (issuing authority).
+    if current_signer.agency_id is None:
+        await _audit_sign_failure(
+            session, request, current_signer, doc_id, "signer_no_agency",
+            "Signer is not assigned to any government agency; ask an admin to assign one",
+            status.HTTP_409_CONFLICT,
+        )
+    agency = (
+        await session.execute(select(Agency).where(Agency.id == current_signer.agency_id))
+    ).scalar_one_or_none()
+    if agency is None:
+        await _audit_sign_failure(
+            session, request, current_signer, doc_id, "agency_not_found",
+            "The signer's assigned agency no longer exists",
+            status.HTTP_409_CONFLICT,
+        )
+
     file_path = Path(doc.storage_path)
     if not file_path.exists():
         await _audit_sign_failure(
@@ -495,6 +512,7 @@ async def sign_document_endpoint(
         canonical = build_qr_canonical(
             doc_id=str(doc.id),
             file_hash=doc.file_hash,
+            issuer=agency.name,
             signer_email=current_signer.email,
             signed_at=signed_at,
             valid_from=issued_at,
@@ -514,6 +532,7 @@ async def sign_document_endpoint(
             qr_signature=qr_signature,
             doc_id=str(doc.id),
             file_hash=doc.file_hash,
+            issuer=agency.name,
             signer_email=current_signer.email,
             signed_at=signed_at,
             valid_from=issued_at,
@@ -526,7 +545,12 @@ async def sign_document_endpoint(
         doc.qr_signature = qr_signature
         doc.signed_by = current_signer.id
         doc.signed_at = signed_at
+        doc.signing_agency_id = agency.id
+        doc.signing_agency_name = agency.name
         doc.status = DocumentStatus.SIGNED
+        # The keys are the single State issuing keys (shared across agencies); the
+        # per-document issuing agency is recorded on the document and bound into
+        # the QR/PDF, not onto the shared key's registry owner.
         doc.public_key_ref = await register_public_key(
             session, algorithm=ALG_MLDSA, public_key=public_key
         )
@@ -550,6 +574,7 @@ async def sign_document_endpoint(
                 qr_payload=qr_payload_str,
                 signed_at=signed_at,
                 signer_email=current_signer.email,
+                issuer=agency.name,
             ),
         )
         signed_pdf_path.write_bytes(signed_pdf_bytes)

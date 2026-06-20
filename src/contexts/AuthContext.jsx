@@ -58,6 +58,7 @@ export function AuthProvider({ children }) {
         login,
         logout,
         role,
+        agencyId: user?.agency_id ?? null,
         isAdmin: role === "admin",
         // Admin retains every staff capability (super-role).
         isReviewer: role === "reviewer" || role === "admin",

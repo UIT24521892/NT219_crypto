@@ -16,6 +16,7 @@ def _fields(email="signer@portal.gov.vn"):
     return dict(
         doc_id="11111111-1111-1111-1111-111111111111",
         file_hash="a" * 64,
+        issuer="Chính phủ",
         signer_email=email,
         signed_at=signed_at,
         valid_from=signed_at,
