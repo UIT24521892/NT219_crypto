@@ -34,7 +34,7 @@ Con can chay tren moi truong day du dependency va PostgreSQL:
 
 | Giai doan | Trang thai | Ghi chu |
 |---|---|---|
-| W1-W3 | Phan lon da co | JWT, RBAC, upload PDF, SHA-256, FALCON va AES-256-GCM da duoc trien khai |
+| W1-W3 | Phan lon da co | JWT, RBAC, upload PDF, SHA-256, ML-DSA-44 (PQC) + Ed25519 (QR offline) va AES-256-GCM da duoc trien khai |
 | W4 - Cot moc 2 | Gan hoan tat | Flow upload va sign da co, nhung sign chua ghi `AuditLog` |
 | W5-W7 | Da trien khai phan lon | QR PNG, CLI offline verifier va PDF tampering attack da co |
 | W8 - Cot moc 3 | Dang lam do | Replay demo va `/audit` da co; online/offline QR chua noi thanh mot flow hoan chinh |
@@ -195,8 +195,8 @@ Workbook yeu cau JWT chi luu trong React context in-memory. `README.md` cho phep
 
 **Hien trang**
 
-- `scripts/benchmark.py:183` da ho tro FALCON-512, FALCON-1024, ML-DSA-44/Dilithium2 va ECDSA-P256.
-- `report_inputs/benchmark_summary.md` hien chi co FALCON-512 va ECDSA-P256.
+- `scripts/benchmark.py:183` da ho tro FALCON-512, FALCON-1024, ML-DSA-44/Dilithium2 va ECDSA-P256 de so sanh giua cac ho.
+- `report_inputs/benchmark_summary.md` hien co ML-DSA-44 (PQC chinh), Ed25519 (QR offline) va ECDSA-P256 (baseline) tu `scripts/benchmark_mldsa_ed25519_ecdsa.py`.
 
 **Can sua**
 
@@ -308,7 +308,7 @@ Workbook yeu cau JWT chi luu trong React context in-memory. `README.md` cho phep
 - [ ] Chot instance type: timeline ghi `t3.medium`, `deploy/DEPLOY.md` ghi `t3.micro`.
 - [ ] Sua request register trong `deploy/DEPLOY.md`: backend hien khong nhan `full_name`, tru khi da them field.
 - [ ] Chay bootstrap EC2.
-- [ ] Xac nhan liboqs co Falcon-512.
+- [ ] Xac nhan liboqs co ML-DSA-44 (FIPS 204).
 - [ ] Xac nhan `.env` co `KEY_PASSPHRASE`, permission `600`.
 - [ ] Xac nhan PostgreSQL, backend systemd va Nginx deu `active (running)`.
 - [ ] Xac nhan TLS.
@@ -385,7 +385,7 @@ PATH=.venv/bin:$PATH python scripts/attack_replay.py
 
 # Benchmark
 PATH=.venv/bin:$PATH python scripts/benchmark.py --iterations 20
-PATH=.venv/bin:$PATH python scripts/benchmark_falcon_ecdsa.py --iterations 20 --warmup 3
+PATH=.venv/bin:$PATH python scripts/benchmark_mldsa_ed25519_ecdsa.py --iterations 20 --warmup 3
 
 # Frontend
 npm ci

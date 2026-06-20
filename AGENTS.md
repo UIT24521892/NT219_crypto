@@ -2,8 +2,10 @@
 # OpenAI Codex custom instructions cho Member A, đồ án NT219 Topic 11
 
 ## Dự án là gì
-Cổng Dịch vụ Công cho Công dân — ký số PDF bằng FALCON-512 (post-quantum),
-xác thực QR online + offline. Member A phụ trách toàn bộ module Crypto/Security.
+Cổng Dịch vụ Công cho Công dân — ký số PDF theo sơ đồ hybrid: ML-DSA-44
+(CRYSTALS-Dilithium, FIPS 204) là chữ ký hậu lượng tử chính (online/PDF
+metadata), kèm chữ ký Ed25519 cổ điển 64 byte trong QR tự chứa để verify offline.
+Member A phụ trách toàn bộ module Crypto/Security.
 
 ## Stack của Member A
 - Python 3.11 + liboqs-python (oqs.Signature)
@@ -18,11 +20,12 @@ PATH=.venv/bin:$PATH python scripts/benchmark.py
 ```
 
 ## File đã hoàn thành (pass hết pytest)
-- backend/app/crypto/falcon_service.py — generate_keypair, hash_document, sign_document, verify_signature, verify_document
+- backend/app/crypto/mldsa_service.py — ML-DSA-44 primary: generate_keypair, hash_document, sign_document, verify_signature, verify_document
+- backend/app/crypto/ed25519_qr_service.py — Ed25519 (classical) cho QR offline: generate_keypair, sign_qr, verify_qr
 - backend/app/crypto/key_manager.py — AES-256-GCM, PBKDF2HMAC, KEY_PASSPHRASE từ env
 - backend/app/crypto/qr_builder.py — build_payload, parse_payload, b64url_decode, is_expired
 - scripts/benchmark.py — Falcon-512/1024, ML-DSA-44, ECDSA-P256 → results/benchmark.csv
-- tests/test_falcon.py (6 passed), test_key_manager.py (4), test_qr_builder.py (4), test_benchmark.py (2)
+- tests/test_mldsa.py, test_qr_hybrid.py, test_key_manager.py, test_qr_builder.py, test_benchmark.py
 
 ## File CẦN làm
 - scripts/verify_qr.py — CLI offline verifier (W6)
@@ -36,10 +39,10 @@ payload = {
     "v":   1,
     "id":  doc_id,           # UUID tài liệu
     "h":   sha256_hex,       # SHA-256(pdf_bytes).hexdigest()
-    "s":   sig_base64url,    # FALCON sig, base64url no-padding
+    "s":   sig_base64url,    # ML-DSA-44 sig, base64url no-padding
     "ts":  int(time.time()), # Unix timestamp lúc ký
     "ex":  int(time.time()) + 365 * 86400,
-    "alg": "FALCON-512",
+    "alg": "ML-DSA-44",
 }
 # Minified: json.dumps(payload, separators=(",", ":"))
 ```
@@ -53,7 +56,7 @@ payload = {
 | ECDSA-P256 | 0.169     | 0.093    | 0.064      | 91        | 138        | 70     |
 
 ## Quy tắc bắt buộc
-- Dùng oqs.Signature("FALCON-512") từ liboqs-python — không tự implement crypto
+- Dùng oqs.Signature("ML-DSA-44") từ liboqs-python — không tự implement crypto
 - KHÔNG lưu private key vào DB hoặc hardcode
 - Private key mã hóa AES-256-GCM, passphrase lấy từ env KEY_PASSPHRASE
 - KHÔNG commit .env hoặc file key
@@ -62,10 +65,20 @@ payload = {
 
 ## Câu hỏi Q&A defense hay gặp
 
-**Tại sao FALCON-512 thay vì Dilithium (ML-DSA — chuẩn NIST chính)?**
-FALCON-512 cho signature nhỏ hơn 3.7x (~655B vs ~2420B). Trong project này sig phải
-nhúng vào QR code nên kích thước quyết định khả năng scan được. Dùng liboqs (C library
-đã audit của Open Quantum Safe) không tự implement.
+**Tại sao ML-DSA-44 làm chữ ký chính (thay vì FALCON-512)?**
+ML-DSA-44 (CRYSTALS-Dilithium) là chuẩn NIST FIPS 204 đã được chuẩn hóa chính
+thức, dựa trên Module-LWE/SIS lattice; ký/verify nhanh và triển khai ổn định trên
+liboqs (C library đã audit của Open Quantum Safe), không tự implement. Đây là lớp
+bảo đảm hậu lượng tử cho tài liệu, verify online / từ metadata PDF.
+
+**Vậy QR offline ký bằng gì? Chữ ký ML-DSA-44 ~2420B quá lớn cho QR mà?**
+Đúng. Chữ ký ML-DSA-44 ~2420 byte và public key ~1312 byte quá lớn để nhét vào
+một QR scan được. Nên QR tự chứa dùng Ed25519 — chữ ký cổ điển chỉ 64 byte,
+public key 32 byte — để verify offline ngay tại chỗ bằng Web Crypto. Lưu ý trung
+thực: Ed25519 KHÔNG phải hậu lượng tử, chỉ là lớp tiện ích UX offline; bảo đảm
+hậu lượng tử thật sự vẫn là ML-DSA-44 (FALCON-512 trước đây từng được cân nhắc
+cho QR vì sig nhỏ ~652B, nhưng vẫn lớn hơn nhiều so với Ed25519 và không phải
+chuẩn FIPS).
 
 **Nếu private key bị lộ thì sao?**
 Sinh keypair mới, update KEY_PASSPHRASE, re-sign tài liệu cần thiết. Public key cũ vẫn

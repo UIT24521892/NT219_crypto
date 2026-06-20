@@ -1,7 +1,10 @@
 # Citizen Services Portal - NT219 Topic 11
 
-Cổng dịch vụ công minh họa luồng ký số PDF bằng FALCON-512, tạo QR xác thực
-online và xuất verification package để kiểm tra offline. Backend dùng FastAPI,
+Cổng dịch vụ công minh họa luồng ký số PDF theo sơ đồ hybrid: ML-DSA-44
+(CRYSTALS-Dilithium, chuẩn NIST FIPS 204) là chữ ký hậu lượng tử chính, ký
+online và nhúng vào metadata PDF; đồng thời một chữ ký Ed25519 cổ điển nhỏ gọn
+được nhúng trong QR tự chứa để xác thực offline ngay tại chỗ. Hệ thống tạo QR
+xác thực và xuất verification package để kiểm tra offline. Backend dùng FastAPI,
 PostgreSQL và `liboqs-python`; frontend dùng React + Vite.
 
 ## 1. Kiến trúc
@@ -16,8 +19,8 @@ FastAPI -------------------- PostgreSQL
    |                            +-- users, documents, audit_log
    |
    +-- storage/uploads/<uuid>.pdf
-   +-- keys/falcon_private.enc.json  (AES-256-GCM)
-   +-- keys/falcon_public.bin
+   +-- keys/mldsa_private.enc.json  (AES-256-GCM)
+   +-- keys/mldsa_public.bin
 ```
 
 Luồng chính:
@@ -36,8 +39,14 @@ QR online encode trực tiếp URL để camera điện thoại mở ổn địn
 ```
 
 Backend lưu metadata `qr_issued_at` và `qr_expires_at`. Endpoint public `/verify`
-đọc PDF hiện tại, kiểm tra expiry và verify FALCON bằng public key đã gắn với
-tài liệu tại thời điểm ký.
+đọc PDF hiện tại, kiểm tra expiry và verify chữ ký ML-DSA-44 bằng public key đã
+gắn với tài liệu tại thời điểm ký.
+
+QR tự chứa (offline scan) mang một chữ ký Ed25519 64 byte để xác thực ngay tại
+chỗ bằng Web Crypto trong trình duyệt, không cần gọi server. Lưu ý trung thực:
+Ed25519 là chữ ký **cổ điển**, KHÔNG phải hậu lượng tử — đây chỉ là lớp tiện ích
+UX offline; bảo đảm hậu lượng tử thật sự nằm ở ML-DSA-44. Chữ ký ML-DSA-44
+~2420 byte quá lớn để nhét vào QR nên được verify online / từ metadata PDF.
 
 Offline package được xuất từ:
 
@@ -48,7 +57,7 @@ GET /documents/{id}/verification-package
 Package chứa public key và payload JSON minified:
 
 ```json
-{"v":1,"id":"...","h":"...","s":"...","ts":1700000000,"ex":1800000000,"alg":"FALCON-512"}
+{"v":1,"id":"...","h":"...","s":"...","ts":1700000000,"ex":1800000000,"alg":"ML-DSA-44"}
 ```
 
 ## 3. Chuẩn bị local
@@ -58,7 +67,7 @@ Yêu cầu:
 - Python 3.11+
 - PostgreSQL 14+
 - Node.js và npm
-- `liboqs-python` cùng FALCON-512 mechanism
+- `liboqs-python` cùng ML-DSA-44 mechanism (FIPS 204)
 
 Tạo database local:
 
@@ -90,7 +99,7 @@ Các biến quan trọng:
 |---|---|
 | `DATABASE_URL` | PostgreSQL async connection string |
 | `JWT_SECRET` | Khóa ký JWT; sinh bằng `openssl rand -hex 32` |
-| `KEY_PASSPHRASE` | Passphrase mã hóa private key FALCON bằng AES-256-GCM |
+| `KEY_PASSPHRASE` | Passphrase mã hóa private key ML-DSA-44 bằng AES-256-GCM |
 | `UPLOAD_DIR` | Thư mục PDF, mặc định `./storage/uploads` tính từ `backend/` |
 | `QR_VALIDITY_DAYS` | Thời hạn QR online và offline package |
 
@@ -148,7 +157,7 @@ hình CSRF phù hợp.
 
 1. Đăng ký hoặc login citizen.
 2. Upload PDF tại `/documents`.
-3. Login admin và ký tài liệu pending bằng nút `Ký FALCON`.
+3. Login admin và ký tài liệu pending bằng nút `Ký ML-DSA-44`.
 4. Mở chi tiết tài liệu và chọn `Xem QR`.
 5. Scan QR bằng camera điện thoại hoặc mở `/verify?d=<document_uuid>`.
 6. Kết quả hợp lệ hiển thị `valid: true`.
@@ -186,7 +195,7 @@ CLI cũ với payload và raw public key vẫn được hỗ trợ:
 PATH=.venv/bin:$PATH python scripts/verify_qr.py \
   --pdf document.pdf \
   --payload offline-payload.json \
-  --public-key falcon-public.bin
+  --public-key mldsa-public.bin
 ```
 
 ## 8. Test và security demo
@@ -197,7 +206,7 @@ Unit test:
 PATH=.venv/bin:$PATH python -m pytest -q
 ```
 
-Integration test cần backend local, PostgreSQL, admin demo và FALCON:
+Integration test cần backend local, PostgreSQL, admin demo và ML-DSA-44:
 
 ```bash
 RUN_API_INTEGRATION=1 \
@@ -229,11 +238,14 @@ Script sinh:
 
 ```bash
 PATH=.venv/bin:$PATH python scripts/benchmark.py --iterations 20
-PATH=.venv/bin:$PATH python scripts/benchmark_falcon_ecdsa.py --iterations 20 --warmup 3
+PATH=.venv/bin:$PATH python scripts/benchmark_mldsa_ed25519_ecdsa.py --iterations 20 --warmup 3
 ```
 
 `scripts/benchmark.py` đo FALCON-512, FALCON-1024, ML-DSA-44/Dilithium2 và
-ECDSA-P256 khi mechanism tương ứng khả dụng. Artifact report:
+ECDSA-P256 để so sánh khi mechanism tương ứng khả dụng;
+`scripts/benchmark_mldsa_ed25519_ecdsa.py` là benchmark report chính cho sơ đồ
+hybrid hiện tại (ML-DSA-44 hậu lượng tử, Ed25519 offline QR, ECDSA-P256 baseline
+cổ điển). Artifact report:
 
 - `report_inputs/full_benchmark.csv`
 - `report_inputs/full_benchmark_summary.md`
@@ -255,7 +267,8 @@ ECDSA-P256 khi mechanism tương ứng khả dụng. Artifact report:
 
 ## 11. Security Notes
 
-- FALCON ký SHA-256 digest của PDF, không tự implement crypto primitive.
+- ML-DSA-44 ký SHA-256 digest (32 byte) của PDF qua liboqs, không tự implement
+  crypto primitive; chữ ký Ed25519 cổ điển trong QR chỉ phục vụ verify offline.
 - Private key mã hóa at rest bằng AES-256-GCM; key derivation dùng
   PBKDF2-HMAC-SHA256 và `KEY_PASSPHRASE`.
 - Endpoint sign tính lại SHA-256 và từ chối nếu file đã đổi sau upload.

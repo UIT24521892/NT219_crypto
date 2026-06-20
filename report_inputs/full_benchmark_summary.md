@@ -1,5 +1,12 @@
 # Full Signature Benchmark Summary
 
+This is a cross-family comparison benchmark. The system's chosen primary
+signature is ML-DSA-44 (CRYSTALS-Dilithium, NIST FIPS 204, Module-LWE/SIS
+lattice; sig ~2420 B, public key ~1312 B), verified online / from PDF metadata;
+the offline QR layer uses a small classical Ed25519 signature (not shown here).
+FALCON-512/1024 (NTRU lattice) rows are included only for comparison — they are
+not the deployed scheme. ECDSA-P256 is a classical baseline.
+
 | Algorithm | Keygen (ms) | Sign (ms) | Verify (ms) | Public key (B) | Private key (B) | Signature (B) | Available |
 |---|---:|---:|---:|---:|---:|---:|---|
 | Falcon-512 | 7.196 | 0.216 | 0.051 | 897 | 1281 | 655 | true |
