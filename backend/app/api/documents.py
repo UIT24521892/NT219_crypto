@@ -29,6 +29,7 @@ from app.auth_middleware import (
     require_reviewer,
     require_signer,
 )
+from app.api.public_keys import ALG_MLDSA, register_public_key
 from app.config import settings
 from app.crypto.mldsa_service import sign_document_async as mldsa_sign
 from app.crypto.qr_builder import (
@@ -445,7 +446,9 @@ async def sign_document_endpoint(
         doc.signed_by = current_signer.id
         doc.signed_at = datetime.now(timezone.utc)
         doc.status = DocumentStatus.SIGNED
-        doc.public_key_ref = hashlib.sha256(public_key).hexdigest()[:16]
+        doc.public_key_ref = await register_public_key(
+            session, algorithm=ALG_MLDSA, public_key=public_key
+        )
         doc.qr_payload = None
         doc.qr_issued_at = None
         doc.qr_expires_at = None
