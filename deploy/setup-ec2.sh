@@ -68,7 +68,7 @@ python3.11 -m venv .venv
 # Pre-build liboqs: lần `import oqs` đầu tiên tự build C lib (~2-5 phút).
 # Làm ngay đây để request /sign đầu tiên không bị chậm/timeout.
 echo "    Building liboqs (first import, ~2-5 phút, kiên nhẫn)..."
-./.venv/bin/python -c "import oqs; assert 'Falcon-512' in oqs.get_enabled_sig_mechanisms(); print('    liboqs OK — Falcon-512 available')" \
+./.venv/bin/python -c "import oqs; assert 'ML-DSA-44' in oqs.get_enabled_sig_mechanisms(); print('    liboqs OK — ML-DSA-44 available')" \
     || echo "    ⚠ liboqs build/import lỗi — check cmake/ninja-build/libssl-dev đã cài đủ."
 
 # ── 4. Tạo .env ──
