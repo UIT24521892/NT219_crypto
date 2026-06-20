@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Demonstrate that PDF tampering invalidates a FALCON QR signature."""
+"""Demonstrate that PDF tampering invalidates an ML-DSA-44 signature."""
 
 from __future__ import annotations
 
