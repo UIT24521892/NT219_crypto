@@ -1,6 +1,7 @@
 """
 Citizen Services Portal - document upload, signing, QR and offline package APIs.
 """
+import asyncio
 import hashlib
 import uuid as uuid_lib
 from datetime import datetime, timedelta, timezone
@@ -39,6 +40,7 @@ from app.config import settings
 from app.crypto import ed25519_qr_service as ed25519
 from app.crypto.mldsa_service import sign_document_async as mldsa_sign
 from app.crypto.mldsa_service import verify_document as mldsa_verify_document
+from app.crypto.pdf_embedder import build_signed_pdf
 from app.crypto.qr_builder import (
     QR_ALGORITHM,
     b64url_encode,
@@ -300,6 +302,37 @@ async def download_document(
     )
 
 
+@router.get("/{doc_id}/signed-download")
+async def download_signed_document(
+    doc_id: uuid_lib.UUID,
+    current_user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+):
+    """Download the self-contained signed PDF (stamped QR + embedded signatures).
+
+    Available to the document owner or staff once the document has been signed.
+    """
+
+    doc = await _get_doc_or_404(doc_id, current_user, session)
+    if not doc.signed_pdf_path:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Document has no signed PDF yet (not signed)",
+        )
+    signed_path = Path(doc.signed_pdf_path)
+    if not signed_path.exists():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Signed PDF missing on disk",
+        )
+    stem = Path(doc.filename).stem or "document"
+    return FileResponse(
+        path=str(signed_path),
+        media_type="application/pdf",
+        filename=f"{stem}_signed.pdf",
+    )
+
+
 async def _load_reviewable_doc(
     session: AsyncSession,
     request: Request,
@@ -500,6 +533,27 @@ async def sign_document_endpoint(
         doc.qr_public_key_ref = await register_public_key(
             session, algorithm=ALG_ED25519, public_key=qr_public_key
         )
+
+        # 4) Build the self-contained signed PDF: stamp the offline QR on page 1
+        #    and embed both signatures + key refs in hidden metadata.
+        signed_pdf_path = file_path.with_name(f"{doc.id}_signed.pdf")
+        loop = asyncio.get_running_loop()
+        signed_pdf_bytes = await loop.run_in_executor(
+            None,
+            lambda: build_signed_pdf(
+                pdf_bytes=pdf_bytes,
+                qr_png=render_png(qr_payload_str),
+                mldsa_signature=signature,
+                qr_signature=qr_signature,
+                public_key_ref=doc.public_key_ref,
+                qr_public_key_ref=doc.qr_public_key_ref,
+                qr_payload=qr_payload_str,
+                signed_at=signed_at,
+                signer_email=current_signer.email,
+            ),
+        )
+        signed_pdf_path.write_bytes(signed_pdf_bytes)
+        doc.signed_pdf_path = str(signed_pdf_path)
         doc.qr_issued_at = issued_at
         doc.qr_expires_at = expires_at
         doc.qr_payload = {

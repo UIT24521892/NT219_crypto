@@ -71,6 +71,7 @@ class DocumentResponse(BaseModel):
     review_note: Optional[str] = None
     signed_by: Optional[uuid.UUID] = None
     signed_at: Optional[datetime] = None
+    has_signed_pdf: bool = False
     public_key_ref: Optional[str] = None
     qr_public_key_ref: Optional[str] = None
     qr_issued_at: Optional[datetime] = None

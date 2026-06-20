@@ -140,6 +140,11 @@ class Document(Base):
         nullable=False,
     )
 
+    @property
+    def has_signed_pdf(self) -> bool:
+        """True once the self-contained signed PDF has been generated."""
+        return bool(self.signed_pdf_path)
+
 
 class PublicKey(Base):
     """Public Key Directory / Trust Registry — one row per issuing public key.

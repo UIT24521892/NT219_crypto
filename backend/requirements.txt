@@ -20,3 +20,7 @@ python-dotenv>=1.0.0
 email-validator>=2.0.0
 qrcode[pil]>=7.4
 liboqs-python>=0.14
+
+# Signed-PDF builder: stamp QR + embed signatures into the PDF
+pikepdf>=9.0
+img2pdf>=0.5
